@@ -170,13 +170,4 @@ void CGraph::solveWorklist() {
 			}
 		}
 	}
-
-	// Print the points-to sets of all nodes after the fixed point is reached
-	for (const auto& [id, node] : IDToNodeMap) {
-		std::cout << "Node " << id << " points to: { ";
-		for (const auto& pt_id : node->getPts()) {
-			std::cout << pt_id << " ";
-		}
-		std::cout << "}\n";
-	}
 }
