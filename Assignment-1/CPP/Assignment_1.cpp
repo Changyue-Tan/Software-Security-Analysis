@@ -30,6 +30,7 @@
 #include <sys/stat.h>
 #include <filesystem>
 #include <fstream>
+#include <queue> // for std::queue
 #include <sstream>
 #include <string>
 
@@ -81,7 +82,6 @@ void ICFGTraversal::reachability(const ICFGNode* curNode, const ICFGNode* snk) {
 			reachability(dst, snk);
 			callstack.pop_back();
 		}
-
 		else if (edge->isRetCFGEdge()) {
 			const RetCFGEdge* retEdge = SVFUtil::dyn_cast<RetCFGEdge>(edge);
 			const CallICFGNode* callSite = retEdge->getCallSite();
@@ -108,13 +108,7 @@ void ICFGTraversal::readSrcSnkFromFile(const string& filename) {
 	/// TODO: your code starts from here
 
 	std::ifstream infile(filename);
-	//
-	// if (!infile.is_open()) {
-	// 	llvm::errs() << "Failed to open file: " << filename << "\n";
-	// 	return;
-	// }
-	//
-	std::string line;
+	string line;
 	int lineNum = 0;
 
 	while (std::getline(infile, line)) {
@@ -147,27 +141,9 @@ void ICFGTraversal::readSrcSnkFromFile(const string& filename) {
 				checker_sink_api.insert(api);
 			}
 		}
-
 		++lineNum;
-		//
-		// if (lineNum >= 2) break;
-		//
 	}
-
 	infile.close();
-	//
-	// Debug print
-	//
-	// llvm::outs() << "Read sources: ";
-	// for (const auto& src : checker_source_api)
-	//     llvm::outs() << src << " ";
-	// llvm::outs() << "\n";
-	//
-	// llvm::outs() << "Read sinks: ";
-	// for (const auto& snk : checker_sink_api)
-	//     llvm::outs() << snk << " ";
-	// llvm::outs() << "\n";
-	//
 }
 
 // TODO: Implement your Andersen's Algorithm here
@@ -180,6 +156,123 @@ void ICFGTraversal::readSrcSnkFromFile(const string& filename) {
 /// pts(q) denotes the points-to set of q
 void AndersenPTA::solveWorklist() {
 	/// TODO: your code starts from here
+
+	std::queue<NodeID> worklist; // Worklist for nodes to process
+	std::unordered_set<NodeID> inWorklist; // Tracks which nodes are already in the worklist
+
+	// === Initialization Phase ===
+	// Add all nodes with Addr edges to the initial worklist
+	for (ConstraintGraph::iterator it = consCG->begin(); it != consCG->end(); ++it) {
+		ConstraintNode* node = it->second;
+
+		for (const ConstraintEdge* edge : node->getOutEdges()) {
+			// Only handle Addr edges here (x = &y)
+			if (edge->getEdgeKind() == ConstraintEdge::Addr) {
+				NodeID src = edge->getSrcID(); // x
+				NodeID tgt = edge->getDstID(); // y
+				// Add y to pts(x); if pts(x) changed, enqueue x
+				if (addPts(src, tgt)) {
+					if (inWorklist.insert(src).second) {
+						worklist.push(src);
+					}
+				}
+			}
+		}
+	}
+
+	// === Main Worklist Propagation Loop ===
+	while (!worklist.empty()) {
+		NodeID currNodeId = worklist.front();
+		worklist.pop();
+		inWorklist.erase(currNodeId);
+
+		processNode(currNodeId); // Optional pre-processing
+
+		ConstraintNode* currNode = consCG->getConstraintNode(currNodeId);
+
+		for (const ConstraintEdge* edge : currNode->getOutEdges()) {
+			NodeID srcId = edge->getSrcID(); // Always == currNodeId
+			NodeID dstId = edge->getDstID();
+
+			switch (edge->getEdgeKind()) {
+			case ConstraintEdge::Load: {
+				// x = *y → pts(x) ⊇ ⋃ pts(p) for p ∈ pts(y)
+				bool changed = false;
+
+				// pts(y) = getPts(srcId)
+				for (NodeID ptr : getPts(srcId)) {
+					// pts(p)
+					for (NodeID pointee : getPts(ptr)) {
+						if (addPts(dstId, pointee)) {
+							changed = true;
+						}
+					}
+				}
+
+				if (changed) {
+					if (inWorklist.insert(dstId).second) {
+						worklist.push(dstId);
+					}
+				}
+				break;
+			}
+
+			case ConstraintEdge::Store: {
+				// *x = y → for p ∈ pts(x), pts(p) ⊇ pts(y)
+				// pts(x) = getPts(srcId)
+				for (NodeID ptr : getPts(srcId)) {
+					if (unionPts(ptr, getPts(dstId))) {
+						if (inWorklist.insert(ptr).second) {
+							worklist.push(ptr);
+						}
+					}
+				}
+				break;
+			}
+
+			case ConstraintEdge::NormalGep: {
+				// x = y + c  →  pts(x) ⊇ { gepObj(y, c) | y ∈ pts(src) }
+				const GepCGEdge* gepEdge = SVFUtil::dyn_cast<GepCGEdge>(edge);
+				APOffset offset = gepEdge->getConstantFieldIdx();
+
+				for (NodeID baseObj : getPts(srcId)) {
+					NodeID gepObj = consCG->getGepObjVar(baseObj, offset);
+					if (addPts(dstId, gepObj)) {
+						if (inWorklist.insert(dstId).second) {
+							worklist.push(dstId);
+						}
+					}
+				}
+				break;
+			}
+
+			case ConstraintEdge::VariantGep: {
+				const GepCGEdge* gepEdge = SVFUtil::dyn_cast<GepCGEdge>(edge);
+				const auto* variantGepEdge = static_cast<const VariantGepCGEdge*>(edge);
+				FieldID fld = variantGepEdge->getFieldIndex();
+
+				bool changed = false;
+				for (NodeID baseObj : getPts(srcId)) {
+					NodeID gepObj = consCG->getGepObjVar(baseObj, fld);
+					if (addPts(dstId, gepObj)) {
+						changed = true;
+					}
+				}
+				if (changed) {
+					if (inWorklist.insert(dstId).second) {
+						worklist.push(dstId);
+					}
+				}
+				break;
+			}
+
+			default:
+				// Skip Addr edges — already handled during initialization
+				break;
+			}
+		}
+		// postProcessNode(currNodeId); // Optional post-processing
+	}
 }
 
 /// TODO: Checking aliases of the two variables at source and sink. For example:
