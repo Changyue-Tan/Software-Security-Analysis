@@ -42,7 +42,7 @@ class AndersenPTA : public SVF::AndersenBase {
  public:
 	// Constructor
 	AndersenPTA(SVF::SVFIR* _pag)
-	: AndersenBase(_pag){};
+	: AndersenBase(_pag) {};
 
 	// dump constraint graph
 	void dump_consCG(std::string name) {
@@ -64,7 +64,7 @@ class AndersenPTA : public SVF::AndersenBase {
 	}
 	/// Return the field object (GepObjVar) given a struct object and a field index
 	inline NodeID getGepObjVar(NodeID id, const APOffset& apOffset) {
-		return consCG->getGepObjVar(id,apOffset);
+		return consCG->getGepObjVar(id, apOffset);
 	}
 };
 

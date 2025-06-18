@@ -46,14 +46,128 @@ using namespace std;
 /// in the format "START->1->2->4->5->END", where -> indicate an ICFGEdge connects two ICFGNode IDs
 void ICFGTraversal::reachability(const ICFGNode* curNode, const ICFGNode* snk) {
 	/// TODO: your code starts from here
+
+	ICFGNodeCallStackPair pair = {curNode, callstack};
+
+	// If this node and callstack combination was visited, skip it
+	if (visited.find(pair) != visited.end())
+		return;
+	visited.insert(pair);
+
+	// Add current node ID to the path
+	path.push_back(curNode->getId());
+
+	// Reached sink
+	if (curNode == snk) {
+		std::string collectedPath = "START";
+		for (unsigned id : path) {
+			collectedPath += "->" + std::to_string(id);
+		}
+		collectedPath += "->END";
+		paths.insert(collectedPath);
+	}
+
+	// Traverse outgoing edges
+	for (const ICFGEdge* edge : curNode->getOutEdges()) {
+		const ICFGNode* dst = edge->getDstNode();
+
+		if (edge->isIntraCFGEdge()) {
+			reachability(dst, snk);
+		}
+		else if (edge->isCallCFGEdge()) {
+			const CallCFGEdge* callEdge = SVFUtil::dyn_cast<CallCFGEdge>(edge);
+			const CallICFGNode* callSite = callEdge->getCallSite();
+			callstack.push_back(callSite);
+			reachability(dst, snk);
+			callstack.pop_back();
+		}
+
+		else if (edge->isRetCFGEdge()) {
+			const RetCFGEdge* retEdge = SVFUtil::dyn_cast<RetCFGEdge>(edge);
+			const CallICFGNode* callSite = retEdge->getCallSite();
+			if (!callstack.empty() && callstack.back() == callSite) {
+				callstack.pop_back();
+				reachability(dst, snk);
+				callstack.push_back(callSite); // Restore after returning
+			}
+			else if (callstack.empty()) {
+				reachability(dst, snk);
+			}
+		}
+	}
+
+	visited.erase(pair); // Backtrack
+	path.pop_back(); // Backtrack path
 }
 
 /// TODO: Implement your code to parse the two lines to identify sources and sinks from `SrcSnk.txt` for your
-/// reachability analysis The format in SrcSnk.txt is in the form of 
-/// line 1 for sources  "{ api1 api2 api3 }" 
+/// reachability analysis The format in SrcSnk.txt is in the form of
+/// line 1 for sources  "{ api1 api2 api3 }"
 /// line 2 for sinks    "{ api1 api2 api3 }"
 void ICFGTraversal::readSrcSnkFromFile(const string& filename) {
 	/// TODO: your code starts from here
+
+	std::ifstream infile(filename);
+	//
+	// if (!infile.is_open()) {
+	// 	llvm::errs() << "Failed to open file: " << filename << "\n";
+	// 	return;
+	// }
+	//
+	std::string line;
+	int lineNum = 0;
+
+	while (std::getline(infile, line)) {
+		std::stringstream ss(line); // convert filestream into stream stream
+		std::string token; // a group of chars seperated by spaces
+
+		// Skip label like "source ->" or "sink ->"
+		ss >> token; // source/sink
+		ss >> token; // ->
+
+		// Convert the rest of ss into a singe line
+		std::string restOfLine;
+		std::getline(ss, restOfLine);
+
+		// Remove braces
+		restOfLine.erase(std::remove(restOfLine.begin(), restOfLine.end(), '{'), restOfLine.end());
+		restOfLine.erase(std::remove(restOfLine.begin(), restOfLine.end(), '}'), restOfLine.end());
+
+		// Convert the rest of line into ss of API(function) names seprated by spaces
+		std::stringstream apiStream(restOfLine);
+		std::string api;
+
+		// read every api's name
+		while (apiStream >> api) {
+			// separate handling for the first line (source) and second line (sink)
+			if (lineNum == 0) {
+				checker_source_api.insert(api);
+			}
+			else if (lineNum == 1) {
+				checker_sink_api.insert(api);
+			}
+		}
+
+		++lineNum;
+		//
+		// if (lineNum >= 2) break;
+		//
+	}
+
+	infile.close();
+	//
+	// Debug print
+	//
+	// llvm::outs() << "Read sources: ";
+	// for (const auto& src : checker_source_api)
+	//     llvm::outs() << src << " ";
+	// llvm::outs() << "\n";
+	//
+	// llvm::outs() << "Read sinks: ";
+	// for (const auto& snk : checker_sink_api)
+	//     llvm::outs() << snk << " ";
+	// llvm::outs() << "\n";
+	//
 }
 
 // TODO: Implement your Andersen's Algorithm here
