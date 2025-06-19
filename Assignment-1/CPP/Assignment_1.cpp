@@ -161,11 +161,11 @@ void AndersenPTA::solveWorklist() {
 	{
 		ConstraintNode* cgNode = nodeIt->second;
 
-		for (const auto* addEdge : cgNode->getAddrOutEdges()) {
-			NodeID dst = addEdge->getDstID(); 
-			NodeID src = addEdge->getSrcID(); 
-			if (addPts(src, dst)) {
-				pushIntoWorklist(src);
+		for (const auto* addrOutEdge : cgNode->getAddrOutEdges()) {
+			NodeID o = addrOutEdge->getSrcID();
+			NodeID p = addrOutEdge->getDstID();
+			if (addPts(p, o)) {
+				pushIntoWorklist(p);
 			}
 		}
 	}
@@ -177,10 +177,8 @@ void AndersenPTA::solveWorklist() {
 
 		for (NodeID o : ptsP) {
 			// === Store rule: for q --Store--> p, create q --Copy--> o for all o in pts(p) ===
-			for (const ConstraintEdge* edge : consCG->getConstraintNode(p)->getStoreInEdges()) {
-				// if (edge->getEdgeKind() != ConstraintEdge::Store)
-				// 	continue;
-				NodeID q = edge->getSrcID();
+			for (const ConstraintEdge* storeInEdge : consCG->getConstraintNode(p)->getStoreInEdges()) {
+				NodeID q = storeInEdge->getSrcID();
 
 				if (addCopyEdge(q, o)) {
 					pushIntoWorklist(q);
@@ -188,10 +186,8 @@ void AndersenPTA::solveWorklist() {
 			}
 
 			// === Load rule: for p --Load--> r, create o --Copy--> r for all o in pts(p) ===
-			for (const ConstraintEdge* edge : consCG->getConstraintNode(p)->getLoadOutEdges()) {
-				// if (edge->getEdgeKind() != ConstraintEdge::Load)
-				// 	continue;
-				NodeID r = edge->getDstID();
+			for (const ConstraintEdge* loadOutEdge : consCG->getConstraintNode(p)->getLoadOutEdges()) {
+				NodeID r = loadOutEdge->getDstID();
 
 				if (addCopyEdge(o, r)) {
 					pushIntoWorklist(o);
@@ -200,28 +196,22 @@ void AndersenPTA::solveWorklist() {
 		}
 
 		// === Copy rule: pts(x) ∪= pts(p) for p --Copy--> x ===
-		for (const ConstraintEdge* edge : consCG->getConstraintNode(p)->getCopyOutEdges()) {
-			// if (edge->getEdgeKind() != ConstraintEdge::Copy)
-			// 	continue;
-			NodeID x = edge->getDstID();
+		for (const ConstraintEdge* copyOutEdge : consCG->getConstraintNode(p)->getCopyOutEdges()) {
+			NodeID x = copyOutEdge->getDstID();
 			if (unionPts(x, ptsP)) {
 				pushIntoWorklist(x);
 			}
 		}
 
 		// === Gep rule: pts(x) ∪= { o.fld | o ∈ pts(p) } for p --Gep,fld--> x ===
-		for (const ConstraintEdge* edge : consCG->getConstraintNode(p)->getGepOutEdges()) {
-			// if (edge->getEdgeKind() != ConstraintEdge::NormalGep)
-			// 	continue;
-
-			NodeID x = edge->getDstID();
-			const NormalGepCGEdge* normalGepEdge = SVFUtil::dyn_cast<NormalGepCGEdge>(edge);
-			APOffset fld = normalGepEdge->getConstantFieldIdx();
+		for (const ConstraintEdge* gepOutEdge : consCG->getConstraintNode(p)->getGepOutEdges()) {
+			const NormalGepCGEdge* normalGepEdge = SVFUtil::dyn_cast<NormalGepCGEdge>(gepOutEdge);
+			NodeID x = normalGepEdge->getDstID();
 
 			bool changed = false;
 			for (NodeID o : ptsP) {
-				NodeID oFld = consCG->getGepObjVar(o, fld);
-				if (addPts(x, oFld)) {
+				NodeID fldObj = consCG->getGepObjVar(o, normalGepEdge->getConstantFieldIdx());
+				if (addPts(x, fldObj)) {
 					changed = true;
 				}
 			}
