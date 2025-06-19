@@ -229,6 +229,17 @@ void AndersenPTA::solveWorklist() {
 /// return true if actualRet is aliased with any parameter at the snk node (e.g., via ander->alias(..,..))
 bool ICFGTraversal::aliasCheck(const CallICFGNode* src, const CallICFGNode* snk) {
 	/// TODO: your code starts from here
+
+	const SVFVar* actualRet = src->getRetICFGNode()->getActualRet();
+	const CallICFGNode::ActualParmNodeVec actualParms = snk->getActualParms();
+
+	// Check all actual arguments to the sink
+	for (const auto parm : actualParms) {
+		if (ander->alias(actualRet, parm)) {
+			return true;
+		}
+	}
+
 	return false;
 }
 
