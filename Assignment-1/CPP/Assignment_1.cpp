@@ -143,10 +143,9 @@ void ICFGTraversal::readSrcSnkFromFile(const string& filename) {
 		}
 		++lineNum;
 	}
-	infile.close();
 }
 
-// TODO: Implement your Andersen's Algorithm here
+/// TODO: Implement your Andersen's Algorithm here
 /// The solving rules are as follows:
 /// p <--Addr-- o        =>  pts(p) = pts(p) ∪ {o}
 /// q <--COPY-- p        =>  pts(q) = pts(q) ∪ pts(p)
@@ -157,121 +156,80 @@ void ICFGTraversal::readSrcSnkFromFile(const string& filename) {
 void AndersenPTA::solveWorklist() {
 	/// TODO: your code starts from here
 
-	std::queue<NodeID> worklist; // Worklist for nodes to process
-	std::unordered_set<NodeID> inWorklist; // Tracks which nodes are already in the worklist
+	// === Initialization Phase: Addr edges ===
+	for (ConstraintGraph::const_iterator nodeIt = consCG->begin(), nodeEit = consCG->end(); nodeIt != nodeEit; nodeIt++)
+	{
+		ConstraintNode* cgNode = nodeIt->second;
 
-	// === Initialization Phase ===
-	// Add all nodes with Addr edges to the initial worklist
-	for (ConstraintGraph::iterator it = consCG->begin(); it != consCG->end(); ++it) {
-		ConstraintNode* node = it->second;
-
-		for (const ConstraintEdge* edge : node->getOutEdges()) {
-			// Only handle Addr edges here (x = &y)
-			if (edge->getEdgeKind() == ConstraintEdge::Addr) {
-				NodeID src = edge->getSrcID(); // x
-				NodeID tgt = edge->getDstID(); // y
-				// Add y to pts(x); if pts(x) changed, enqueue x
-				if (addPts(src, tgt)) {
-					if (inWorklist.insert(src).second) {
-						worklist.push(src);
-					}
-				}
+		for (const auto* addEdge : cgNode->getAddrOutEdges()) {
+			NodeID dst = addEdge->getDstID(); 
+			NodeID src = addEdge->getSrcID(); 
+			if (addPts(src, dst)) {
+				pushIntoWorklist(src);
 			}
 		}
 	}
 
-	// === Main Worklist Propagation Loop ===
-	while (!worklist.empty()) {
-		NodeID currNodeId = worklist.front();
-		worklist.pop();
-		inWorklist.erase(currNodeId);
+	// === Main Worklist Propagation ===
+	while (!isWorklistEmpty()) {
+		NodeID p = popFromWorklist();
+		const PointsTo& ptsP = getPts(p);
 
-		processNode(currNodeId); // Optional pre-processing
+		for (NodeID o : ptsP) {
+			// === Store rule: for q --Store--> p, create q --Copy--> o for all o in pts(p) ===
+			for (const ConstraintEdge* edge : consCG->getConstraintNode(p)->getStoreInEdges()) {
+				// if (edge->getEdgeKind() != ConstraintEdge::Store)
+				// 	continue;
+				NodeID q = edge->getSrcID();
 
-		ConstraintNode* currNode = consCG->getConstraintNode(currNodeId);
-
-		for (const ConstraintEdge* edge : currNode->getOutEdges()) {
-			NodeID srcId = edge->getSrcID(); // Always == currNodeId
-			NodeID dstId = edge->getDstID();
-
-			switch (edge->getEdgeKind()) {
-			case ConstraintEdge::Load: {
-				// x = *y → pts(x) ⊇ ⋃ pts(p) for p ∈ pts(y)
-				bool changed = false;
-
-				// pts(y) = getPts(srcId)
-				for (NodeID ptr : getPts(srcId)) {
-					// pts(p)
-					for (NodeID pointee : getPts(ptr)) {
-						if (addPts(dstId, pointee)) {
-							changed = true;
-						}
-					}
+				if (addCopyEdge(q, o)) {
+					pushIntoWorklist(q);
 				}
-
-				if (changed) {
-					if (inWorklist.insert(dstId).second) {
-						worklist.push(dstId);
-					}
-				}
-				break;
 			}
 
-			case ConstraintEdge::Store: {
-				// *x = y → for p ∈ pts(x), pts(p) ⊇ pts(y)
-				// pts(x) = getPts(srcId)
-				for (NodeID ptr : getPts(srcId)) {
-					if (unionPts(ptr, getPts(dstId))) {
-						if (inWorklist.insert(ptr).second) {
-							worklist.push(ptr);
-						}
-					}
+			// === Load rule: for p --Load--> r, create o --Copy--> r for all o in pts(p) ===
+			for (const ConstraintEdge* edge : consCG->getConstraintNode(p)->getLoadOutEdges()) {
+				// if (edge->getEdgeKind() != ConstraintEdge::Load)
+				// 	continue;
+				NodeID r = edge->getDstID();
+
+				if (addCopyEdge(o, r)) {
+					pushIntoWorklist(o);
 				}
-				break;
-			}
-
-			case ConstraintEdge::NormalGep: {
-				// x = y + c  →  pts(x) ⊇ { gepObj(y, c) | y ∈ pts(src) }
-				const GepCGEdge* gepEdge = SVFUtil::dyn_cast<GepCGEdge>(edge);
-				APOffset offset = gepEdge->getConstantFieldIdx();
-
-				for (NodeID baseObj : getPts(srcId)) {
-					NodeID gepObj = consCG->getGepObjVar(baseObj, offset);
-					if (addPts(dstId, gepObj)) {
-						if (inWorklist.insert(dstId).second) {
-							worklist.push(dstId);
-						}
-					}
-				}
-				break;
-			}
-
-			case ConstraintEdge::VariantGep: {
-				const GepCGEdge* gepEdge = SVFUtil::dyn_cast<GepCGEdge>(edge);
-				const auto* variantGepEdge = static_cast<const VariantGepCGEdge*>(edge);
-				FieldID fld = variantGepEdge->getFieldIndex();
-
-				bool changed = false;
-				for (NodeID baseObj : getPts(srcId)) {
-					NodeID gepObj = consCG->getGepObjVar(baseObj, fld);
-					if (addPts(dstId, gepObj)) {
-						changed = true;
-					}
-				}
-				if (changed) {
-					if (inWorklist.insert(dstId).second) {
-						worklist.push(dstId);
-					}
-				}
-				break;
-			}
-
-			default:
-				// Skip Addr edges — already handled during initialization
-				break;
 			}
 		}
-		// postProcessNode(currNodeId); // Optional post-processing
+
+		// === Copy rule: pts(x) ∪= pts(p) for p --Copy--> x ===
+		for (const ConstraintEdge* edge : consCG->getConstraintNode(p)->getCopyOutEdges()) {
+			// if (edge->getEdgeKind() != ConstraintEdge::Copy)
+			// 	continue;
+			NodeID x = edge->getDstID();
+			if (unionPts(x, ptsP)) {
+				pushIntoWorklist(x);
+			}
+		}
+
+		// === Gep rule: pts(x) ∪= { o.fld | o ∈ pts(p) } for p --Gep,fld--> x ===
+		for (const ConstraintEdge* edge : consCG->getConstraintNode(p)->getGepOutEdges()) {
+			// if (edge->getEdgeKind() != ConstraintEdge::NormalGep)
+			// 	continue;
+
+			NodeID x = edge->getDstID();
+			const NormalGepCGEdge* normalGepEdge = SVFUtil::dyn_cast<NormalGepCGEdge>(edge);
+			APOffset fld = normalGepEdge->getConstantFieldIdx();
+
+			bool changed = false;
+			for (NodeID o : ptsP) {
+				NodeID oFld = consCG->getGepObjVar(o, fld);
+				if (addPts(x, oFld)) {
+					changed = true;
+				}
+			}
+
+			if (changed) {
+				pushIntoWorklist(x);
+			}
+		}
 	}
 }
 
