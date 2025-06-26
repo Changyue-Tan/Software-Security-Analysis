@@ -31,6 +31,7 @@
 using namespace z3;
 using namespace SVF;
 using namespace SVFUtil;
+
 /*
  // Please set the "program": "${workspaceFolder}/bin/ass3" in file '.vscode/launch.json'
  // To run your testcase from 1-7, please set the string number for "args" in file'.vscode/launch.json'
@@ -47,7 +48,8 @@ int main(int argc, char** argv) {
 	if (test_name == "test0") {
 		z3Mgr->test0();
 		//  assert(x==5);
-		result = z3Mgr->hasZ3Expr("x") && z3Mgr->z3Expr2NumValue(z3Mgr->getZ3Expr("x")) == 5;
+		z3::expr assert_cond = (z3Mgr->getZ3Expr("x") == z3Mgr->getZ3Expr(5));
+		result = z3Mgr->checkNegateAssert(assert_cond);
 	}
 	else if (test_name == "test1") {
 		z3Mgr->test1();
