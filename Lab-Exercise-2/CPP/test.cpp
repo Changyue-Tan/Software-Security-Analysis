@@ -47,7 +47,7 @@ int main(int argc, char** argv) {
 	std::string test_name = argv[1];
 	if (test_name == "test0") {
 		z3Mgr->test0();
-		//  assert(x==5);
+		// assert(x==5);
 		z3::expr assert_cond = (z3Mgr->getZ3Expr("x") == z3Mgr->getZ3Expr(5));
 		result = z3Mgr->checkNegateAssert(assert_cond);
 	}
@@ -55,61 +55,71 @@ int main(int argc, char** argv) {
 		z3Mgr->test1();
 		// assert(b > 0);
 		// You are suggested to write your own results checking here
-		result = false;
+		z3::expr assert_cond = (z3Mgr->getZ3Expr("b") > z3Mgr->getZ3Expr(0));
+		result = z3Mgr->checkNegateAssert(assert_cond);
 	}
 	else if (test_name == "test2") {
 		z3Mgr->test2();
 		// assert(b > 3);
 		// You are suggested to write your own results checking here
-		result = false;
+		z3::expr assert_cond = (z3Mgr->getZ3Expr("b") > z3Mgr->getZ3Expr(3));
+		result = z3Mgr->checkNegateAssert(assert_cond);
 	}
 	else if (test_name == "test3") {
 		z3Mgr->test3();
 		// assert(x==10);
 		// You are suggested to write your own results checking here
-		result = false;
+		z3::expr assert_cond = (z3Mgr->getZ3Expr("x") == z3Mgr->getZ3Expr(10));
+		result = z3Mgr->checkNegateAssert(assert_cond);
 	}
 	else if (test_name == "test4") {
 		z3Mgr->test4();
 		// assert((a + b)>20);
 		// You are suggested to write your own results checking here
-		result = false;
+		z3::expr assert_cond = ((z3Mgr->getZ3Expr("a") +  z3Mgr->getZ3Expr("b")) > z3Mgr->getZ3Expr(20));
+		result = z3Mgr->checkNegateAssert(assert_cond);
 	}
 	else if (test_name == "test5") {
 		z3Mgr->test5();
 		// assert(b1 >= 5);
 		// You are suggested to write your own results checking here
-		result = false;
+		z3::expr assert_cond = (z3Mgr->getZ3Expr("b1") >= z3Mgr->getZ3Expr(5));
+		result = z3Mgr->checkNegateAssert(assert_cond);
 	}
 	else if (test_name == "test6") {
 		z3Mgr->test6();
 		// assert(*p == 5);
 		// You are suggested to write your own results checking here
-		result = false;
+		z3::expr assert_cond = (z3Mgr->loadValue(z3Mgr->getZ3Expr("p")) == z3Mgr->getZ3Expr(5));
+		result = z3Mgr->checkNegateAssert(assert_cond);
 	}
 	else if (test_name == "test7") {
 		z3Mgr->test7();
 		// assert(d == 5);
 		// You are suggested to write your own results checking here
-		result = false;
+		z3::expr assert_cond = (z3Mgr->getZ3Expr("d") >= z3Mgr->getZ3Expr(5));
+		result = z3Mgr->checkNegateAssert(assert_cond);
 	}
 	else if (test_name == "test8") {
 		z3Mgr->test8();
 		// assert(*p == 0);
 		// You are suggested to write your own results checking here
-		result = false;
+		z3::expr assert_cond = (z3Mgr->loadValue(z3Mgr->getZ3Expr("p")) == z3Mgr->getZ3Expr(0));
+		result = z3Mgr->checkNegateAssert(assert_cond);
 	}
 	else if (test_name == "test9") {
 		z3Mgr->test9();
 		//assert(z == 15);
 		// You are suggested to write your own results checking here
-		result = false;
+		z3::expr assert_cond = (z3Mgr->getZ3Expr("z") >= z3Mgr->getZ3Expr(15));
+		result = z3Mgr->checkNegateAssert(assert_cond);
 	}
 	else if (test_name == "test10") {
 		z3Mgr->test10();
 		// assert(x == 3 && y == 2);
 		// You are suggested to write your own results checking here
-		result = false;
+		z3::expr assert_cond = (z3Mgr->getZ3Expr("x") >= z3Mgr->getZ3Expr(3)) && (z3Mgr->getZ3Expr("y") >= z3Mgr->getZ3Expr(2));
+		result = z3Mgr->checkNegateAssert(assert_cond);
 	}
 	else {
 		std::cerr << "Invalid test name" << std::endl;
