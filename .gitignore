@@ -37,3 +37,6 @@ Testing
 *.sh
 cmake-build-debug/
 compile_commands.json
+
+.vscode/
+.github/
