@@ -119,8 +119,8 @@ namespace SVF {
 			if (getSolver().check() != z3::unsat) {
 				DBOP(printExprValues());
 				std::stringstream ss;
-				ss << "The assertion is unsatisfiable!! ("<< inode->toString() << ")" << "\n";
-				ss << "Counterexample: " << getSolver().get_model() << "\n";
+				ss << "The assertion is unsatisfiable!! \n("<< inode->toString() << ")" << "\n";
+				ss << "Counterexample: \n" << getSolver().get_model() << "\n";
 				SVFUtil::outs() << ss.str() << std::endl;
 				assert(false);
 				return false;

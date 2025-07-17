@@ -101,31 +101,27 @@ void SSE::reachability(const ICFGEdge* curEdge, const ICFGNode* snk) {
 /// Note that translatePath returns true if the path is feasible, false if the path is infeasible. (3) If a path is
 /// feasible, you will need to call assertchecking to verify the assertion (which is the last ICFGNode of this path).
 void SSE::collectAndTranslatePath() {
-	/// TODO: your code starts from here
-
-	// Convert the path (vector of edges) to a string key
+	// Start with START
 	std::stringstream ss;
 	ss << "START";
+
+	// Add node IDs along the path from each edge
+	// We only add the dstNode ID of each edge to avoid duplication
 	for (const ICFGEdge* e : path) {
-		if (e->getSrcNode()) {
-			ss << "->" << e->getSrcNode()->getId();
-		}
-		else {
-			ss << "->START"; // Or skip, or print placeholder
-		}
-		ss << "->" << e->getDstNode()->getId();
+		const ICFGNode* dst = e->getDstNode();
+		ss << "->" << dst->getId();
 	}
 
 	ss << "->END";
-	std::string pathStr = ss.str();
 
-	// Insert path string into the set of paths
+	// Construct and insert the path string
+	std::string pathStr = ss.str();
 	paths.insert(pathStr);
 
-	// Translate the path to Z3 constraints
+	// Check feasibility of the path
 	bool feasible = translatePath(path);
 
-	// If path is feasible, check assertion at the last node
+	// If feasible, perform assertion checking at the last node
 	if (feasible) {
 		const ICFGNode* lastNode = path.back()->getDstNode();
 		assertchecking(lastNode);
@@ -277,33 +273,48 @@ bool SSE::handleNonBranch(const IntraCFGEdge* edge) {
 			/// TODO: implement AddrStmt handler here
 
 			// x = &y
-			u32_t lhsID = addr->getLHSVarID();
-			u32_t rhsID = addr->getRHSVarID(); // y
+			auto lhsID = addr->getLHSVarID(); // x
+			auto rhsID = addr->getRHSVarID(); // y
 
 			// x = get address of y
-			expr addrExpr = getMemObjAddress(rhsID);
+			auto lhsExpr = getZ3Expr(lhsID);
+			auto rhsExpr = getMemObjAddress(rhsID);
+
+			auto addrExpr = getMemObjAddress(rhsID);
 			z3Mgr->updateZ3Expr(lhsID, addrExpr);
+			addToSolver(getZ3Expr(lhsID) == addrExpr);
 		}
 		else if (const CopyStmt* copy = SVFUtil::dyn_cast<CopyStmt>(stmt)) {
 			/// TODO: implement CopyStmt handler her
 
 			// x = y
-			u32_t lhsID = copy->getLHSVarID();
-			u32_t rhsID = copy->getRHSVarID();
+			auto lhsID = copy->getLHSVarID(); // x
+			auto rhsID = copy->getRHSVarID(); // y
 
-			expr rhsExpr = getZ3Expr(rhsID);
-			z3Mgr->updateZ3Expr(lhsID, rhsExpr);
+			z3::expr lhsExpr = getZ3Expr(lhsID);
+			z3::expr rhsExpr = getZ3Expr(rhsID);
+
+			auto rhs = getZ3Expr(rhsID);
+			z3Mgr->updateZ3Expr(lhsID, rhs);
+			addToSolver(getZ3Expr(lhsID) == rhs);
 		}
 		else if (const LoadStmt* load = SVFUtil::dyn_cast<LoadStmt>(stmt)) {
 			/// TODO: implement LoadStmt handler here
 
 			// x = *p
-			u32_t lhsID = load->getLHSVarID();
-			u32_t ptrID = load->getRHSVarID(); // pointer to value
+			u32_t lhsID = load->getLHSVarID(); // x
+			u32_t ptrID = load->getRHSVarID(); // p
 
+			// Get the Z3 expression for the pointer
 			expr ptrExpr = getZ3Expr(ptrID);
+
+			// Use z3Mgr to load the value from memory pointed by ptrExpr
 			expr valExpr = z3Mgr->loadValue(ptrExpr);
+
+			// Update the Z3 expression for x to reflect the loaded value
 			z3Mgr->updateZ3Expr(lhsID, valExpr);
+
+			addToSolver(getZ3Expr(lhsID) == valExpr);
 		}
 		else if (const StoreStmt* store = SVFUtil::dyn_cast<StoreStmt>(stmt)) {
 			/// TODO: implement StoreStmt handler here
@@ -359,6 +370,7 @@ bool SSE::handleNonBranch(const IntraCFGEdge* edge) {
 			}
 
 			z3Mgr->updateZ3Expr(lhsID, result);
+			addToSolver(getZ3Expr(lhsID) == result);
 		}
 		else if (const BinaryOPStmt* binary = SVFUtil::dyn_cast<BinaryOPStmt>(stmt)) {
 			expr op0 = getZ3Expr(binary->getOpVarID(0));
@@ -402,6 +414,8 @@ bool SSE::handleNonBranch(const IntraCFGEdge* edge) {
 			assert(opINodeFound && "predecessor ICFGNode of this PhiStmt not found?");
 		}
 	}
+
+	z3Mgr->printZ3Exprs();
 
 	return true;
 }
