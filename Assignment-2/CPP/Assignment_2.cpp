@@ -33,6 +33,8 @@ using namespace SVFUtil;
 using namespace llvm;
 using namespace z3;
 
+#define DEBUG 0
+
 /// TODO: Implement your context-sensitive ICFG traversal here to traverse each program path (once for any loop) from
 /// You will need to collect each path from src node to snk node and then add the path to the `paths` set by
 /// calling the `collectAndTranslatePath` method, in which translatePath method is called.
@@ -101,6 +103,17 @@ void SSE::reachability(const ICFGEdge* curEdge, const ICFGNode* snk) {
 /// Note that translatePath returns true if the path is feasible, false if the path is infeasible. (3) If a path is
 /// feasible, you will need to call assertchecking to verify the assertion (which is the last ICFGNode of this path).
 void SSE::collectAndTranslatePath() {
+
+	std::set<const ICFGNode*> nodesInPath;
+    for (const ICFGEdge* e : path) {
+        const ICFGNode* node = e->getDstNode();
+        if (!nodesInPath.insert(node).second) {
+            std::cout << "Loop detected at node: " << node->getId() << "\n";
+        } else {
+			std::cout << "No loop at: " << node->getId() << "\n";
+		}
+    }
+
 	// Start with START
 	std::stringstream ss;
 	ss << "START";
@@ -117,6 +130,9 @@ void SSE::collectAndTranslatePath() {
 	// Construct and insert the path string
 	std::string pathStr = ss.str();
 	paths.insert(pathStr);
+
+	// --- Print path for debugging ---
+    std::cout << "Path: " << pathStr << std::endl;
 
 	getSolver().push();
 
@@ -147,19 +163,29 @@ void SSE::collectAndTranslatePath() {
 void SSE::handleCall(const CallCFGEdge* calledge) {
 	/// TODO: your code starts from here
 
-	// Iterate over all CallPEs associated with this call edge.
-	// Each CallPE represents a dataflow edge: formal = actual (parameter assignment).
-	for (const auto callPE : calledge->getCallPEs()) {
-		const auto rhsVarID = callPE->getRHSVarID(); // Actual parameter in caller (under c)
-		pushCallingCtx(callPE->getCallSite());
-		const auto lhsVarID = callPE->getLHSVarID(); // Formal parameter in callee (under c')
+	// (1) Collect all actual‐parameter expressions under the *caller* context
+	struct Bind {
+		u32_t lhsID;
+		z3::expr rhsExpr;
+	};
+	std::vector<Bind> binds;
+	binds.reserve(calledge->getCallPEs().size());
 
-		const auto lhsExpr = getZ3Expr(lhsVarID);
-		const auto rhsExpr = getZ3Expr(rhsVarID);
-		addToSolver(lhsExpr == rhsExpr);
+	for (const CallPE* callPE : calledge->getCallPEs()) {
+		u32_t rhsVarID = callPE->getRHSVarID(); // actual in caller
+		z3::expr rhsExpr = getZ3Expr(rhsVarID); // ⟨[c], rhs⟩
+		binds.push_back({callPE->getLHSVarID(), rhsExpr});
 	}
 
-	// printExprValues();
+	// (2) Enter the callee context
+	pushCallingCtx(calledge->getCallSite());
+
+	// (3)&(4) For each bind, retrieve the *formal* under callee context and assert equality
+	for (const auto& b : binds) {
+		u32_t lhsVarID = b.lhsID; // formal in callee
+		z3::expr lhsExpr = getZ3Expr(lhsVarID); // ⟨[c'], lhs⟩
+		addToSolver(lhsExpr == b.rhsExpr); // add ⟨[c'], lhs⟩ ≡ ⟨[c], rhs⟩
+	}
 }
 
 /// TODO: Implement handling of function returns
@@ -174,17 +200,27 @@ void SSE::handleCall(const CallCFGEdge* calledge) {
 void SSE::handleRet(const RetCFGEdge* retEdge) {
 	/// TODO: your code starts from here
 
-	const auto retPE = retEdge->getRetPE();
+	// This edge may have zero or one RetPE; guard against none
+	auto retPE = retEdge->getRetPE();
+	if (retPE == nullptr) {
+		// Nothing to bind—just pop context and return
+		popCallingCtx();
+		return;
+	}
 
-	const auto rhsVarID = retPE->getRHSVarID(); // z, in callee
+	// (1) Capture RHS under the callee context
+	u32_t rhsVarID = retPE->getRHSVarID(); // z in callee
+	z3::expr rhsExpr = getZ3Expr(rhsVarID); // ⟨[c′], rhs⟩
+
+	// (2) Pop back to caller context
 	popCallingCtx();
-	const auto lhsVarID = retPE->getLHSVarID(); // r, in caller
 
-	const auto lhsExpr = getZ3Expr(lhsVarID);
-	const auto rhsExpr = getZ3Expr(rhsVarID);
+	// (3) Capture LHS under the caller context
+	u32_t lhsVarID = retPE->getLHSVarID(); // r in caller
+	z3::expr lhsExpr = getZ3Expr(lhsVarID); // ⟨[c], lhs⟩
+
+	// (4) Enforce ⟨[c′], rhs⟩ == ⟨[c], lhs⟩
 	addToSolver(lhsExpr == rhsExpr);
-
-	// printExprValues();
 }
 
 /// TODO: Implement handling of branch statements inside a function
@@ -196,24 +232,24 @@ void SSE::handleRet(const RetCFGEdge* retEdge) {
 /// edge->getCondition() returns the branch condition variable (%cmp) of type SVFValue* (for if/else) or a numeric
 /// condition variable (for switch). Given the condition variable, you could obtain the SVFVar ID via
 /// "edge->getCondition()->getId()" edge->getCondition() returns nullptr if this IntraCFGEdge is not a branch.
-/// edge->getSuccessorCondValue() returns the actual condition value (1/0 for if/else) when this branch/IntraCFGEdge is
-/// executed. For example, the successorCondValue is 1 on the edge from ICFGNode1 to ICFGNode2, and 0 on the edge from
-/// ICFGNode1 to ICFGNode3
+/// edge->getSuccessorCondValue() returns the actual condition value (1/0 for if/else) when this branch/IntraCFGEdge
+/// is executed. For example, the successorCondValue is 1 on the edge from ICFGNode1 to ICFGNode2, and 0 on the edge
+/// from ICFGNode1 to ICFGNode3
 bool SSE::handleBranch(const IntraCFGEdge* edge) {
 	/// TODO: your code starts from here
 
 	auto cond = edge->getCondition();
-    auto condID = cond->getId();
-    auto condExpr = getZ3Expr(condID);
-    auto succ = edge->getSuccessorCondValue(); // 0 or 1
+	auto condID = cond->getId();
+	auto condExpr = getZ3Expr(condID);
+	auto succ = edge->getSuccessorCondValue(); // 0 or 1
 
-    addToSolver(condExpr == getCtx().int_val((u32_t)succ));
+	addToSolver(condExpr == getCtx().int_val((u32_t)succ));
 
-    // Feasibility check
-    if (getSolver().check() == z3::unsat) {
-        return false;
-    }
-    return true;
+	// Feasibility check
+	if (getSolver().check() == z3::unsat) {
+		return false;
+	}
+	return true;
 }
 
 /// TODO: Translate AddrStmt, CopyStmt, LoadStmt, StoreStmt, GepStmt and CmpStmt
@@ -229,13 +265,21 @@ bool SSE::handleNonBranch(const IntraCFGEdge* edge) {
 			/// TODO: implement AddrStmt handler here
 
 			// x = &y
-			auto lhsID = addr->getLHSVarID(); // x
+			auto ptrID = addr->getLHSVarID(); // x
 			auto rhsID = addr->getRHSVarID(); // y
 
 			// x = get address of y
-			auto lhsExpr = getZ3Expr(lhsID);
+			auto lhsExpr = getZ3Expr(ptrID);
 			auto obj = getMemObjAddress(rhsID);
+
 			addToSolver(lhsExpr == obj);
+
+			if (DEBUG) {
+				std::cout << "ADDR: ptr=" << ptrID << ", addr=" << rhsID << "\n";
+				std::cout << "address of " << rhsID << " is " << obj << "\n";
+				printExprValues();
+				z3Mgr->printZ3Exprs();
+			}
 		}
 		else if (const CopyStmt* copy = SVFUtil::dyn_cast<CopyStmt>(stmt)) {
 			/// TODO: implement CopyStmt handler her
@@ -248,6 +292,12 @@ bool SSE::handleNonBranch(const IntraCFGEdge* edge) {
 			z3::expr rhsExpr = getZ3Expr(rhsID);
 
 			addToSolver(lhsExpr == rhsExpr);
+
+			if (DEBUG) {
+				std::cout << "COPY: ptr=" << lhsID << ", val=" << rhsID << "\n";
+				printExprValues();
+				z3Mgr->printZ3Exprs();
+			}
 		}
 		else if (const LoadStmt* load = SVFUtil::dyn_cast<LoadStmt>(stmt)) {
 			/// TODO: implement LoadStmt handler here
@@ -264,6 +314,12 @@ bool SSE::handleNonBranch(const IntraCFGEdge* edge) {
 			expr valExpr = z3Mgr->loadValue(ptrExpr);
 
 			addToSolver(lhsExpr == valExpr);
+
+			if (DEBUG) {
+				std::cout << "LOAD: lhs=" << lhsID << ", *ptr=" << ptrID << "\n";
+				printExprValues();
+				z3Mgr->printZ3Exprs();
+			}
 		}
 		else if (const StoreStmt* store = SVFUtil::dyn_cast<StoreStmt>(stmt)) {
 			/// TODO: implement StoreStmt handler here
@@ -273,14 +329,17 @@ bool SSE::handleNonBranch(const IntraCFGEdge* edge) {
 			u32_t ptrID = store->getLHSVarID(); // pointer, e.g., p
 			u32_t valID = store->getRHSVarID(); // value to be stored, e.g., 3
 
-			std::cout << "STORE: ptr=" << ptrID << ", val=" << valID << "\n";
-			// printExprValues();
-
 			auto ptrAdd = getZ3Expr(ptrID);
 
 			expr valExpr = getZ3Expr(valID);
 
 			z3Mgr->storeValue(ptrAdd, valExpr);
+
+			if (DEBUG) {
+				std::cout << "STORE: ptr=" << ptrID << ", val=" << valID << "\n";
+				printExprValues();
+				z3Mgr->printZ3Exprs();
+			}
 		}
 		else if (const GepStmt* gep = SVFUtil::dyn_cast<GepStmt>(stmt)) {
 			/// TODO: implement GepStmt handler here
