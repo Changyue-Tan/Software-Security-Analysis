@@ -33,7 +33,7 @@ using namespace SVFUtil;
 using namespace llvm;
 using namespace z3;
 
-#define DEBUG 0
+#define DEBUG 1
 
 /// TODO: Implement your context-sensitive ICFG traversal here to traverse each program path (once for any loop) from
 /// You will need to collect each path from src node to snk node and then add the path to the `paths` set by
@@ -41,6 +41,11 @@ using namespace z3;
 /// This implementation, slightly different from Assignment-1, requires ICFGNode* as the first argument.
 void SSE::reachability(const ICFGEdge* curEdge, const ICFGNode* snk) {
 	/// TODO: your code starts from here
+
+	if (path.size() > 10000) {
+		std::cerr << "Stack limit exceeded: likely infinite recursion in CFG.\n";
+		return;
+	}
 
 	ICFGEdgeStackPair pair = {curEdge, callingCtx};
 
@@ -94,7 +99,7 @@ void SSE::reachability(const ICFGEdge* curEdge, const ICFGNode* snk) {
 	}
 
 	path.pop_back(); // Backtrack path
-	visited.erase(pair); // Backtrack visited set
+	// visited.erase(pair); // Backtrack visited set
 }
 
 /// TODO: collect each path once this method is called during reachability analysis, and
@@ -103,16 +108,16 @@ void SSE::reachability(const ICFGEdge* curEdge, const ICFGNode* snk) {
 /// Note that translatePath returns true if the path is feasible, false if the path is infeasible. (3) If a path is
 /// feasible, you will need to call assertchecking to verify the assertion (which is the last ICFGNode of this path).
 void SSE::collectAndTranslatePath() {
-
 	std::set<const ICFGNode*> nodesInPath;
-    for (const ICFGEdge* e : path) {
-        const ICFGNode* node = e->getDstNode();
-        if (!nodesInPath.insert(node).second) {
-            std::cout << "Loop detected at node: " << node->getId() << "\n";
-        } else {
+	for (const ICFGEdge* e : path) {
+		const ICFGNode* node = e->getDstNode();
+		if (!nodesInPath.insert(node).second) {
+			std::cout << "Loop detected at node: " << node->getId() << "\n";
+		}
+		else {
 			std::cout << "No loop at: " << node->getId() << "\n";
 		}
-    }
+	}
 
 	// Start with START
 	std::stringstream ss;
@@ -132,7 +137,7 @@ void SSE::collectAndTranslatePath() {
 	paths.insert(pathStr);
 
 	// --- Print path for debugging ---
-    std::cout << "Path: " << pathStr << std::endl;
+	std::cout << "Path: " << pathStr << std::endl;
 
 	getSolver().push();
 

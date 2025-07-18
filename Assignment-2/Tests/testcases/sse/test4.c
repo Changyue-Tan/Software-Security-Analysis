@@ -1,69 +1,39 @@
 #include <stdbool.h>
 extern void svf_assert(bool);
 
-typedef struct { int x, y; } Point;
-
-// A helper to swap via pointer args
-void swap(int* a, int* b) {
-    int tmp = *a;
-    *a = *b;
-    *b = tmp;
-}
-
-// Increment both fields of a Point via pointer
-void bump(Point* p) {
-    p->x = p->x + 1;
-    p->y = p->y + 2;
-}
-
 int main() {
-    // 1) Simple direct store & load
-    int a = 5;
-    int b = a;                // CopyStmt
-    svf_assert(b == 5);
+    int a = 20;
+    int b = 6;
 
-    // 2) Addr + store through pointer
-    int *p = &a;              // AddrStmt
-    *p = 7;                   // StoreStmt
-    svf_assert(a == 7);
+    // 1) Addition
+    svf_assert((a + b) == 26);
 
-    // 3) Interprocedural swap
-    int x = 3, y = 4;
-    swap(&x, &y);
-    svf_assert(x == 4);
-    svf_assert(y == 3);
+    // 2) Subtraction
+    svf_assert((a - b) == 14);
 
-    // 4) Struct fields & GEP
-    Point pt = { .x = 10, .y = 20 };
-    bump(&pt);
-    svf_assert(pt.x == 11);
-    svf_assert(pt.y == 22);
+    // 3) Multiplication
+    svf_assert((a * b) == 120);
 
-    // 5) Array + GEP + load
-    int arr[3] = { 2, 4, 6 };
-    int *q = arr;             // &arr[0]
-    int v1 = q[1];            // equivalent to *(&arr + 1)
-    svf_assert(v1 == 4);
-    int *r = &arr[2];
-    svf_assert(r[0] == 6);
+    // 4) Signed division
+    svf_assert((a / b) == 3);
 
-    // 6) Conditional (Select) and Phi via two paths
-    int c;
-    if (a > b) {
-        c = a - b;
-    } else {
-        c = b - a;
-    }
-    // c = |a - b|
-    svf_assert(c == (a > b ? a - b : b - a));
+    // 5) Signed remainder
+    svf_assert((a % b) == 2);
 
-    // 7) Combined pointer arithmetic
-    int z = 0;
-    int idx = 2;
-    int *base = &arr[0];
-    int *elem = base + idx;  // GEP: ptr + offset
-    *elem = 42;               // StoreStmt through computed address
-    svf_assert(arr[2] == 42);
+    // 6) Bitwise AND
+    svf_assert((a & b) == (20 & 6));
+
+    // 7) Bitwise OR
+    svf_assert((a | b) == (20 | 6));
+
+    // 8) Bitwise XOR
+    svf_assert((a ^ b) == (20 ^ 6));
+
+    // 9) Logical left shift (Shl)
+    svf_assert((a << 1) == 40);
+
+    // 10) Arithmetic right shift (AShr)
+    svf_assert((a >> 1) == 10);
 
     return 0;
 }
