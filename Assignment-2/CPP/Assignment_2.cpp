@@ -33,7 +33,7 @@ using namespace SVFUtil;
 using namespace llvm;
 using namespace z3;
 
-#define DEBUG 1
+#define DEBUG 0
 
 /// TODO: Implement your context-sensitive ICFG traversal here to traverse each program path (once for any loop) from
 /// You will need to collect each path from src node to snk node and then add the path to the `paths` set by

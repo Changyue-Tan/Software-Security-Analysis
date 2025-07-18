@@ -1,48 +1,28 @@
 #include <stdbool.h>
 extern void svf_assert(bool);
 
-int compute_sum(int x, int y) {
-    int result;
-    if (x > y) {
-        result = x + y;
-    } else {
-        result = y - x;
-    }
-    return result;
+// Innermost function: adds two numbers
+int add(int a, int b) {
+    return a + b;
 }
 
-int compute_product(int a, int b) {
-    int result;
-    if (a % 2 == 0) {
-        result = a * b;
-    } else {
-        result = a + b * 2;
-    }
-    return result;
+// Mid-level function: adds three numbers by calling add twice
+int add_three(int x, int y, int z) {
+    int temp = add(x, y);
+    return add(temp, z);
 }
 
-int process(int m, int n) {
-    int sum = compute_sum(m, n);         // load m, n → call compute_sum → store to sum
-    int prod = compute_product(m, n);    // load m, n → call compute_product → store to prod
-
-    int final_result;
-    if (sum < prod) {
-        final_result = prod - sum;
-    } else {
-        final_result = sum - prod;
-    }
-    return final_result;                 // load final_result
+// Top-level function: calls add_three with given parameters
+int process(int p, int q, int r) {
+    return add_three(p, q, r);
 }
 
 int main() {
-    int x = 3;
-    int y = 5;
+    int res1 = process(1, 2, 3);  // 1 + 2 + 3 = 6
+    int res2 = process(4, 5, 6);  // 4 + 5 + 6 = 15
 
-    int res1 = process(x, y);   // multiple interprocedural calls
-    int res2 = process(6, 2);
-
-    svf_assert(res1 == 10);     // (5 - 3) = 2, 3 + 5*2 = 13 → 13 - 2 = 11
-    svf_assert(res2 == 4);      // (6 + 2) = 8, 6*2 = 12 → 12 - 8 = 4
+    svf_assert(res1 == 6);
+    svf_assert(res2 == 15);
 
     return 0;
 }
