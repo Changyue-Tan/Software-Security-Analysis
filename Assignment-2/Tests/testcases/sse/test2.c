@@ -3,11 +3,11 @@
 extern void svf_assert(bool);
 
 void foo(int* p) {
-    *p = 1;
+    *p = 4321;
 }
 
 int main() {
-    int a = 0;
+    int a = 1234;
     foo(&a);
-    svf_assert(a == 1);
+    svf_assert(a == 4321);
 }

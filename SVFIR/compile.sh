@@ -13,7 +13,7 @@ if [ -n "$1" ]; then
 
     # Use clang to compile the .c file to LLVM IR (.ll file), preserving variable names
     # and disabling optimizations that may discard value names
-    clang-16 -S -c -Xclang -disable-O0-optnone -fno-discard-value-names -emit-llvm "$1" -o "$ll_file"
+    clang-16 -S -fno-discard-value-names -emit-llvm "$1" -o "$ll_file"
     # clang -g -S -c -Xclang -disable-O0-optnone -fno-discard-value-names -emit-llvm "$1" -o "$ll_file"
     
     # Use LLVM's 'opt' tool to apply the mem2reg pass, which promotes memory to register

@@ -483,14 +483,14 @@ void Z3Examples::test9() {
 	storeValue(x, getZ3Expr(5));
 
 	// q = &(p->f0);
-	expr p_f0 = getGepObjAddress(p, 0); // field 0
+	expr p_f0 = getGepObjAddress(p, 0); // A->first
 	addToSolver(q == p_f0);
 
 	// *q = 10;
 	storeValue(q, getZ3Expr(10));
 
 	// r = &(p->f1);
-	expr p_f1 = getGepObjAddress(p, 1); // field 1 (pointer field)
+	expr p_f1 = getGepObjAddress(p, 1); // A->second
 	addToSolver(r == p_f1);
 
 	// *r = x;

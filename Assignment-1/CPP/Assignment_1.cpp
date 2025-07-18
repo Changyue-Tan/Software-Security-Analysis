@@ -234,7 +234,7 @@ bool ICFGTraversal::aliasCheck(const CallICFGNode* src, const CallICFGNode* snk)
 	const CallICFGNode::ActualParmNodeVec actualParms = snk->getActualParms();
 
 	// Check all actual arguments to the sink
-	for (const auto parm : actualParms) {
+	for (const SVFVar* parm : actualParms) {
 		if (ander->alias(actualRet, parm)) {
 			return true;
 		}
