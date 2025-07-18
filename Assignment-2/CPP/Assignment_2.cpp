@@ -47,7 +47,7 @@ void SSE::reachability(const ICFGEdge* curEdge, const ICFGNode* snk) {
 		return;
 	}
 
-	ICFGEdgeStackPair pair = {curEdge, callingCtx};
+	ICFGEdgeStackPair pair = {curEdge, callstack};
 
 	// If this edge + context already visited, skip
 	if (visited.find(pair) != visited.end())
@@ -74,11 +74,11 @@ void SSE::reachability(const ICFGEdge* curEdge, const ICFGNode* snk) {
 				const CallCFGEdge* callEdge = SVFUtil::dyn_cast<CallCFGEdge>(nextEdge);
 				if (!callEdge)
 					continue;
-				const CallICFGNode* callSite = callEdge->getCallSite();
 
-				pushCallingCtx(callSite);
+				const CallICFGNode* callSite = callEdge->getCallSite();
+				callstack.push_back(callSite);
 				reachability(nextEdge, snk);
-				popCallingCtx();
+				callstack.pop_back(); // Backtrack call
 			}
 			else if (nextEdge->isRetCFGEdge()) {
 				const RetCFGEdge* retEdge = SVFUtil::dyn_cast<RetCFGEdge>(nextEdge);
@@ -99,7 +99,7 @@ void SSE::reachability(const ICFGEdge* curEdge, const ICFGNode* snk) {
 	}
 
 	path.pop_back(); // Backtrack path
-	// visited.erase(pair); // Backtrack visited set
+	visited.erase(pair); // Backtrack visited set
 }
 
 /// TODO: collect each path once this method is called during reachability analysis, and
@@ -111,11 +111,13 @@ void SSE::collectAndTranslatePath() {
 	std::set<const ICFGNode*> nodesInPath;
 	for (const ICFGEdge* e : path) {
 		const ICFGNode* node = e->getDstNode();
-		if (!nodesInPath.insert(node).second) {
-			std::cout << "Loop detected at node: " << node->getId() << "\n";
-		}
-		else {
-			std::cout << "No loop at: " << node->getId() << "\n";
+		if (0) {
+			if (!nodesInPath.insert(node).second) {
+				std::cout << "Loop detected at node: " << node->getId() << "\n";
+			}
+			else {
+				std::cout << "No loop at: " << node->getId() << "\n";
+			}
 		}
 	}
 
@@ -136,14 +138,23 @@ void SSE::collectAndTranslatePath() {
 	std::string pathStr = ss.str();
 	paths.insert(pathStr);
 
-	// --- Print path for debugging ---
-	std::cout << "Path: " << pathStr << std::endl;
+	if (DEBUG) {
+		// --- Print path for debugging ---
+		std::cout << "Path: " << pathStr << std::endl;
+	}
 
 	getSolver().push();
 
 	// Check feasibility of the path
 	bool feasible = translatePath(path);
-
+	if (DEBUG) {
+		if (feasible) {
+			std::cout << "This path IS feasible" << std::endl;
+		}
+		else {
+			std::cout << "This path IS NOT feasible" << std::endl;
+		}
+	}
 	// printExprValues();
 
 	// If feasible, perform assertion checking at the last node
@@ -279,7 +290,7 @@ bool SSE::handleNonBranch(const IntraCFGEdge* edge) {
 
 			addToSolver(lhsExpr == obj);
 
-			if (DEBUG) {
+			if (0) {
 				std::cout << "ADDR: ptr=" << ptrID << ", addr=" << rhsID << "\n";
 				std::cout << "address of " << rhsID << " is " << obj << "\n";
 				printExprValues();
@@ -298,7 +309,7 @@ bool SSE::handleNonBranch(const IntraCFGEdge* edge) {
 
 			addToSolver(lhsExpr == rhsExpr);
 
-			if (DEBUG) {
+			if (0) {
 				std::cout << "COPY: ptr=" << lhsID << ", val=" << rhsID << "\n";
 				printExprValues();
 				z3Mgr->printZ3Exprs();
@@ -320,7 +331,7 @@ bool SSE::handleNonBranch(const IntraCFGEdge* edge) {
 
 			addToSolver(lhsExpr == valExpr);
 
-			if (DEBUG) {
+			if (0) {
 				std::cout << "LOAD: lhs=" << lhsID << ", *ptr=" << ptrID << "\n";
 				printExprValues();
 				z3Mgr->printZ3Exprs();
@@ -340,7 +351,7 @@ bool SSE::handleNonBranch(const IntraCFGEdge* edge) {
 
 			z3Mgr->storeValue(ptrAdd, valExpr);
 
-			if (DEBUG) {
+			if (0) {
 				std::cout << "STORE: ptr=" << ptrID << ", val=" << valID << "\n";
 				printExprValues();
 				z3Mgr->printZ3Exprs();
