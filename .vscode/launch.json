@@ -14,10 +14,10 @@
       // |  Assignment-2    | "${workspaceFolder}/bin/ass2"      | "Assignment-2/Tests/testcases/sse/test1.ll" |
       // |  Assignment-3    | "${workspaceFolder}/bin/ass3"      | "Assignment-3/Tests/ae/test1.ll" |
       "program": "${workspaceFolder}/bin/ass2",
-      "args": ["Assignment-2/Tests/testcases/sse/test13.ll"], // may input the test llvm bc file or other options and flags the program may use
+      "args": ["Assignment-2/Tests/testcases/sse/test14.ll"], // may input the test llvm bc file or other options and flags the program may use
       "cwd": "${workspaceFolder}",
       "preLaunchTask": "C/C++: cpp build active file",
-      "MIMode": "gdb"  // change to "gdb" if you are using non-macOS system
+      "MIMode": "lldb"  // change to "gdb" if you are using non-macOS system
     }
   ]
 }
