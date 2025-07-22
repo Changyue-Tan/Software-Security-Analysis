@@ -102,11 +102,9 @@ void SSE::reachability(const ICFGEdge* curEdge, const ICFGNode* snk) {
 	visited.erase(pair); // Backtrack visited set
 }
 
-/// TODO: collect each path once this method is called during reachability analysis, and
-/// Collect each program path from the entry to each assertion of the program. In this function,
-/// you will need (1) add each path into the paths set, (2) call translatePath to convert each path into Z3 expressions.
-/// Note that translatePath returns true if the path is feasible, false if the path is infeasible. (3) If a path is
-/// feasible, you will need to call assertchecking to verify the assertion (which is the last ICFGNode of this path).
+//// you will need (1) add each path into the paths set; (2) call translatePath to convert each path into Z3 expressions.
+/// Note that translatePath returns true if the path is feasible, false if the path is infeasible; (3) If a path is feasible,
+/// you will need to call assertchecking to verify the assertion (which is the last ICFGNode of this path); (4) reset z3 solver.
 void SSE::collectAndTranslatePath() {
 	std::set<const ICFGNode*> nodesInPath;
 	for (const ICFGEdge* e : path) {
@@ -143,7 +141,7 @@ void SSE::collectAndTranslatePath() {
 		std::cout << "Path: " << pathStr << std::endl;
 	}
 
-	getSolver().push();
+	// getSolver().push();
 
 	// Check feasibility of the path
 	bool feasible = translatePath(path);
@@ -165,7 +163,8 @@ void SSE::collectAndTranslatePath() {
 		assertchecking(lastNode);
 	}
 
-	getSolver().pop();
+	// getSolver().pop();
+	getSolver().reset();
 }
 
 /// TODO: Implement handling of function calls
