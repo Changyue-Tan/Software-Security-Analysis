@@ -232,10 +232,10 @@ void Z3Examples::test4() {
     addToSolver(p == malloc1);
 
     // x = &p[0];
-    addToSolver(x == getGepObjAddress(p, getZ3Expr(0)));
+    addToSolver(x == getGepObjAddress(p, 0));
 
     // y = &p[1];
-    addToSolver(y == getGepObjAddress(p, getZ3Expr(1)));
+    addToSolver(y == getGepObjAddress(p, 1));
 
     // *x = 10;
     storeValue(x, getZ3Expr(10));
