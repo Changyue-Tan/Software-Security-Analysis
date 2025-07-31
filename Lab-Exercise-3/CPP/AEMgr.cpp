@@ -249,7 +249,7 @@ namespace SVF {
 		//       z = *q + *y;
 		//       assert(z==15);
 		AEState as;
-		NodeID p = getNodeID("p", 2);
+		NodeID p = getNodeID("p");
 		NodeID x = getNodeID("x");
 		NodeID q = getNodeID("q");
 		NodeID r = getNodeID("r");
