@@ -175,10 +175,17 @@ class ICFGWTO:
 
 
     def get_successors(self, node: ICFGNode) -> List[ICFGNode]:
+        successors = []
         if isinstance(node, pysvf.CallICFGNode):
             return [node.getRetICFGNode()]
         else:
-            return [edge.getDstNode() for edge in node.getOutEdges()]
+            for e in node.getOutEdges():
+                if not e.isIntraCFGEdge() or node.getFun() != e.getDstNode().getFun():
+                    continue
+                else:
+                    successors.append(e.getDstNode())
+        return successors
+
 
     def build_node_to_depth(self):
         builder = self.WTOCycleDepthBuilder(self.node_to_depth)
@@ -513,18 +520,6 @@ class AbstractExecution:
         for stmt in self.icfg.getGlobalICFGNode().getSVFStmts():
             self.updateAbsState(stmt)
 
-
-    """
-    Handle the WTO (Weak Topological Order) components.
-    This function iterates through the WTO components and handles them based on their type.
-    It calls the appropriate helper function for each component, such as handle_singleton_wto or handleCycleWto.
-    """
-    def handleWtoComponents(self, wtoComps):
-        for comp in wtoComps:
-            if isinstance(comp, ICFGWTONode):
-                self.handleICFGNode(comp)
-            elif isinstance(comp, ICFGWTOCycle):
-                self.handleCycleWto(comp)
 
     """
     Handle a function in the ICFG using WTO components and worklist algorithm.
