@@ -36,6 +36,11 @@ using namespace SVFUtil;
 void AbstractExecution::updateStateOnCopy(const CopyStmt* copy) {
 	/// TODO: your code starts from here
 
+	const ICFGNode* node = copy->getICFGNode();
+	AbstractState& as = getAbsStateFromTrace(node);
+	NodeID lhs = copy->getLHSVarID();
+	NodeID rhs = copy->getRHSVarID();
+	as[lhs] = as[rhs]; // Value or address copy
 }
 
 /// Find the comparison predicates in "class BinaryOPStmt:OpCode" under SVF/svf/include/SVFIR/SVFStatements.h
@@ -43,22 +48,100 @@ void AbstractExecution::updateStateOnCopy(const CopyStmt* copy) {
 /// including Add, FAdd, Sub, FSub, Mul, FMul, SDiv, FDiv, UDiv, SRem, FRem, URem, Xor, And, Or, AShr, Shl, LShr
 void AbstractExecution::updateStateOnBinary(const BinaryOPStmt* binary) {
 	/// TODO: your code starts from here
+	const ICFGNode* node = binary->getICFGNode();
+	AbstractState& as = getAbsStateFromTrace(node);
 
+	NodeID lhs = binary->getResID();
+	NodeID op1 = binary->getOpVarID(0);
+	NodeID op2 = binary->getOpVarID(1);
+
+	if (as.inVarToValTable(op1) && as.inVarToValTable(op2)) {
+		const IntervalValue& v1 = as[op1].getInterval();
+		const IntervalValue& v2 = as[op2].getInterval();
+
+		IntervalValue result;
+		switch (binary->getOpcode()) {
+		case BinaryOPStmt::Add: result = v1 + v2; break;
+		case BinaryOPStmt::Sub: result = v1 - v2; break;
+		case BinaryOPStmt::Mul: result = v1 * v2; break;
+		case BinaryOPStmt::SDiv: result = v1 / v2; break;
+		case BinaryOPStmt::SRem: result = v1 % v2; break;
+		case BinaryOPStmt::And: result = v1 & v2; break;
+		case BinaryOPStmt::Or: result = v1 | v2; break;
+		case BinaryOPStmt::Xor: result = v1 ^ v2; break;
+		case BinaryOPStmt::Shl: result = v1 << v2; break;
+		case BinaryOPStmt::AShr: result = v1 >> v2; break;
+		default: result = IntervalValue::top(); break;
+		}
+		as[lhs] = result;
+	}
 }
 
 void AbstractExecution::updateStateOnStore(const StoreStmt* store) {
 	/// TODO: your code starts from here
 
+	const ICFGNode* node = store->getICFGNode();
+	AbstractState& as = getAbsStateFromTrace(node);
+
+	NodeID ptrID = store->getLHSVarID(); // the memory address to store to
+	NodeID valID = store->getRHSVarID(); // the value to store
+
+	// Step 1: Check if the pointer variable is valid and holds an address
+	if (as.inVarToAddrsTable(ptrID)) {
+		auto ptrVal = as[ptrID];
+		if (ptrVal.isAddr()) {
+			AddressValue addrVal = ptrVal.getAddrs();
+			u32_t memLoc = addrVal.getVirtualMemAddress(ptrID);
+
+			// Step 2: Get the value to store (val may be interval or address)
+			AbstractValue valueToStore = as[valID]; // Always use operator[] to get it
+
+			// Step 3: Store into the memory
+			as.store(memLoc, valueToStore);
+		}
+	}
 }
 
 void AbstractExecution::updateStateOnLoad(const LoadStmt* load) {
 	/// TODO: your code starts from here
 
+	const ICFGNode* node = load->getICFGNode();
+	AbstractState& as = getAbsStateFromTrace(node);
+
+	NodeID ptrID = load->getRHSVarID();
+	NodeID lhsID = load->getLHSVarID();
+
+	const auto& addrs = as[ptrID].getAddrs();
+
+	AbstractValue result;
+	for (const auto& addr : addrs) {
+		if (as.inAddrToValTable(addr)) {
+			const auto& val = as[addr];
+			result.join_with(val); // Abstract join (e.g., interval join, union of points-to sets, etc.)
+		}
+	}
+
+	as[lhsID] = result; // Store final merged value to destination
 }
 
 void AbstractExecution::updateStateOnGep(const GepStmt* gep) {
 	/// TODO: your code starts from here
 
+	const ICFGNode* node = gep->getICFGNode();
+	AbstractState& as = getAbsStateFromTrace(node);
+
+	NodeID lhs = gep->getLHSVarID(); // Destination variable
+	NodeID rhs = gep->getRHSVarID(); // Base pointer variable
+
+	// Step 3: get index offset (array or field index)
+	IntervalValue index = as.getElementIndex(gep);
+
+	// Step 4: compute GEP address = base address + offset
+	// as.getGepObjAddrs usually returns an AddressValue or AbstractValue wrapping address intervals
+	AddressValue gepAddr = as.getGepObjAddrs(rhs, index);
+
+	// Step 5: assign computed address to LHS
+	as[lhs] = AbstractValue(gepAddr);
 }
 
 void AbstractExecution::updateStateOnPhi(const PhiStmt* phi) {
@@ -67,9 +150,10 @@ void AbstractExecution::updateStateOnPhi(const PhiStmt* phi) {
 }
 
 /// TODO: handle GepStmt `lhs = rhs + off` and detect buffer overflow
-// Step 1: For each `obj \in pts(rhs)`, get the size of allocated baseobj (entire mem object) via `obj_size = svfir->getBaseObj(objId)->getByteSizeOfObj();`
-// There is a buffer overflow if `accessOffset.ub() >= obj_size`, where accessOffset is obtained via `getAccessOffset`
-// Step 2: invoke `reportBufOverflow` with the current ICFGNode if an overflow is detected
+// Step 1: For each `obj \in pts(rhs)`, get the size of allocated baseobj (entire mem object) via `obj_size =
+// svfir->getBaseObj(objId)->getByteSizeOfObj();` There is a buffer overflow if `accessOffset.ub() >= obj_size`, where
+// accessOffset is obtained via `getAccessOffset` Step 2: invoke `reportBufOverflow` with the current ICFGNode if an
+// overflow is detected
 void AbstractExecution::bufOverflowDetection(const SVF::SVFStmt* stmt) {
 	if (!SVFUtil::isa<CallICFGNode>(stmt->getICFGNode())) {
 		if (const GepStmt* gep = SVFUtil::dyn_cast<GepStmt>(stmt)) {
@@ -80,37 +164,39 @@ void AbstractExecution::bufOverflowDetection(const SVF::SVFStmt* stmt) {
 
 			/// TODO: your code starts from here
 
+			
 		}
 	}
 }
 
 /**
  * @brief Handle ICFG nodes in a cycle using widening and narrowing operators
- * 
+ *
  * This function implements abstract interpretation for cycles in the ICFG using widening and narrowing
  * operators to ensure termination. It processes all ICFG nodes within a cycle and implements
  * widening-narrowing iteration to reach fixed points twice: once for widening (to ensure termination)
  * and once for narrowing (to improve precision).
- * 
+ *
  * @param cycle The WTO cycle containing ICFG nodes to be processed
  * @return void
  */
 void AbstractExecution::handleICFGCycle(const ICFGCycleWTO* cycle) {
 	// Get execution states from in edges
-	bool is_feasible = mergeStatesFromPredecessors(cycle->head()->getICFGNode(), preAbsTrace[cycle->head()->getICFGNode()]);
+	bool is_feasible =
+	    mergeStatesFromPredecessors(cycle->head()->getICFGNode(), preAbsTrace[cycle->head()->getICFGNode()]);
 	if (!is_feasible) {
 		return;
-	} else {
+	}
+	else {
 		AbstractState pre_as = preAbsTrace[cycle->head()->getICFGNode()];
 		// set -widen-delay
 		s32_t widen_delay = Options::WidenDelay();
 		bool increasing = true;
 		/// TODO: your code starts from here
 
-
+		
 	}
 }
-
 
 /// Abstract state updates on an AddrStmt
 void AbstractExecution::updateStateOnAddr(const AddrStmt* addr) {
@@ -295,17 +381,16 @@ void AbstractExecution::updateStateOnSelect(const SelectStmt* select) {
 
 void AbstractExecution::updateStateOnExtCall(const SVF::CallICFGNode* extCallNode) {
 	std::string funcName = extCallNode->getCalledFunction()->getName();
-	//TODO: handle external calls
-	// void mem_insert(void *buffer, const void *data, size_t data_size, size_t position);
+	// TODO: handle external calls
+
+	//  void mem_insert(void *buffer, const void *data, size_t data_size, size_t position);
 	if (funcName == "mem_insert") {
 		// check sizeof(buffer) > position + data_size
 		/// TODO: your code starts from here
-
 	}
 	// void str_insert(void *buffer, const void *data, size_t position);
 	else if (funcName == "str_insert") {
 		// check sizeof(buffer) > position + strlen(data)
 		/// TODO: your code starts from here
-
 	}
 }
