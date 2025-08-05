@@ -38,9 +38,11 @@ void AbstractExecution::updateStateOnCopy(const CopyStmt* copy) {
 
 	const ICFGNode* node = copy->getICFGNode();
 	AbstractState& as = getAbsStateFromTrace(node);
+
 	NodeID lhs = copy->getLHSVarID();
 	NodeID rhs = copy->getRHSVarID();
-	as[lhs] = as[rhs]; // Value or address copy
+	as[lhs] = as[rhs];
+	std::cout << "[Copy] Var" << lhs << " = Var" << rhs << " : " << as[lhs].toString() << std::endl;
 }
 
 /// Find the comparison predicates in "class BinaryOPStmt:OpCode" under SVF/svf/include/SVFIR/SVFStatements.h
@@ -48,6 +50,7 @@ void AbstractExecution::updateStateOnCopy(const CopyStmt* copy) {
 /// including Add, FAdd, Sub, FSub, Mul, FMul, SDiv, FDiv, UDiv, SRem, FRem, URem, Xor, And, Or, AShr, Shl, LShr
 void AbstractExecution::updateStateOnBinary(const BinaryOPStmt* binary) {
 	/// TODO: your code starts from here
+
 	const ICFGNode* node = binary->getICFGNode();
 	AbstractState& as = getAbsStateFromTrace(node);
 
@@ -55,11 +58,12 @@ void AbstractExecution::updateStateOnBinary(const BinaryOPStmt* binary) {
 	NodeID op1 = binary->getOpVarID(0);
 	NodeID op2 = binary->getOpVarID(1);
 
+	// only if both operands have interval values
 	if (as.inVarToValTable(op1) && as.inVarToValTable(op2)) {
 		const IntervalValue& v1 = as[op1].getInterval();
 		const IntervalValue& v2 = as[op2].getInterval();
-
 		IntervalValue result;
+
 		switch (binary->getOpcode()) {
 		case BinaryOPStmt::Add: result = v1 + v2; break;
 		case BinaryOPStmt::Sub: result = v1 - v2; break;
@@ -71,9 +75,16 @@ void AbstractExecution::updateStateOnBinary(const BinaryOPStmt* binary) {
 		case BinaryOPStmt::Xor: result = v1 ^ v2; break;
 		case BinaryOPStmt::Shl: result = v1 << v2; break;
 		case BinaryOPStmt::AShr: result = v1 >> v2; break;
-		default: result = IntervalValue::top(); break;
+		case BinaryOPStmt::LShr:
+		default:
+			// Fallback for floating‐point, unsigned shifts, etc.
+			result = IntervalValue::top();
+			break;
 		}
+
 		as[lhs] = result;
+
+		std::cout << "[Binary] Var" << lhs << " = " << result.toString() << "\n";
 	}
 }
 
@@ -83,22 +94,32 @@ void AbstractExecution::updateStateOnStore(const StoreStmt* store) {
 	const ICFGNode* node = store->getICFGNode();
 	AbstractState& as = getAbsStateFromTrace(node);
 
-	NodeID ptrID = store->getLHSVarID(); // the memory address to store to
-	NodeID valID = store->getRHSVarID(); // the value to store
+	NodeID ptrID = store->getLHSVarID();
+	NodeID valID = store->getRHSVarID();
 
-	// Step 1: Check if the pointer variable is valid and holds an address
-	if (as.inVarToAddrsTable(ptrID)) {
-		auto ptrVal = as[ptrID];
-		if (ptrVal.isAddr()) {
-			AddressValue addrVal = ptrVal.getAddrs();
-			u32_t memLoc = addrVal.getVirtualMemAddress(ptrID);
+	if (!as.inVarToAddrsTable(ptrID)) {
+		std::cout << "[Store] Pointer Var" << ptrID << " not in address table!" << std::endl;
+		return;
+	}
 
-			// Step 2: Get the value to store (val may be interval or address)
-			AbstractValue valueToStore = as[valID]; // Always use operator[] to get it
+	AddressValue addrVal = as[ptrID].getAddrs();
+	AbstractValue valueToStore = as[valID];
 
-			// Step 3: Store into the memory
-			as.store(memLoc, valueToStore);
+	for (u32_t idx : addrVal.getVals()) {
+		u32_t addrID = idx; // internal address ID
+		u32_t memAddr = AddressValue::getVirtualMemAddress(addrID);
+		std::cout << "[Store] Storing to internal AddrID " << addrID << " (virtual 0x" << std::hex << memAddr
+		          << std::dec << ") = " << valueToStore.toString() << " (from Var" << valID << ")" << std::endl;
+
+		if (valueToStore.isInterval()) {
+			std::cout << "[Store] : storing interval value!" << std::endl;
 		}
+		else if (valueToStore.isAddr()) {
+			std::cout << "[Store] : storing address value!" << std::endl;
+		}
+
+		as.storeValue(addrID, valueToStore);
+		std::cout << "[Store] -> AEState::storeValue(" << addrID << ") updated." << std::endl;
 	}
 }
 
@@ -108,20 +129,23 @@ void AbstractExecution::updateStateOnLoad(const LoadStmt* load) {
 	const ICFGNode* node = load->getICFGNode();
 	AbstractState& as = getAbsStateFromTrace(node);
 
-	NodeID ptrID = load->getRHSVarID();
-	NodeID lhsID = load->getLHSVarID();
+	NodeID ptrID = load->getRHSVarID(); // pointer
+	NodeID lhsID = load->getLHSVarID(); // destination var
 
-	const auto& addrs = as[ptrID].getAddrs();
-
+	// AE: join values from all memory locations pointed to
 	AbstractValue result;
-	for (const auto& addr : addrs) {
-		if (as.inAddrToValTable(addr)) {
-			const auto& val = as[addr];
-			result.join_with(val); // Abstract join (e.g., interval join, union of points-to sets, etc.)
+	if (as.inVarToAddrsTable(ptrID)) {
+		AddressValue addrs = as[ptrID].getAddrs();
+		for (u32_t addr : addrs.getVals()) {
+			if (as.inAddrToValTable(addr)) {
+				result.join_with(as[addr]);
+			}
 		}
 	}
+	as[lhsID] = result;
 
-	as[lhsID] = result; // Store final merged value to destination
+	// Debug: print abstract state after this update
+	as.printAbstractState();
 }
 
 void AbstractExecution::updateStateOnGep(const GepStmt* gep) {
@@ -130,23 +154,37 @@ void AbstractExecution::updateStateOnGep(const GepStmt* gep) {
 	const ICFGNode* node = gep->getICFGNode();
 	AbstractState& as = getAbsStateFromTrace(node);
 
-	NodeID lhs = gep->getLHSVarID(); // Destination variable
-	NodeID rhs = gep->getRHSVarID(); // Base pointer variable
+	NodeID lhs = gep->getLHSVarID();
+	NodeID rhs = gep->getRHSVarID();
 
-	// Step 3: get index offset (array or field index)
+	// AE: compute element index, then GEP addresses
 	IntervalValue index = as.getElementIndex(gep);
+	AddressValue gepAddrs = as.getGepObjAddrs(rhs, index);
+	as[lhs] = AbstractValue(gepAddrs);
 
-	// Step 4: compute GEP address = base address + offset
-	// as.getGepObjAddrs usually returns an AddressValue or AbstractValue wrapping address intervals
-	AddressValue gepAddr = as.getGepObjAddrs(rhs, index);
-
-	// Step 5: assign computed address to LHS
-	as[lhs] = AbstractValue(gepAddr);
+	// Debug: print abstract state after this update
+	as.printAbstractState();
 }
 
 void AbstractExecution::updateStateOnPhi(const PhiStmt* phi) {
 	/// TODO: your code starts from here
 
+	const ICFGNode* node = phi->getICFGNode();
+	AbstractState& as = getAbsStateFromTrace(node);
+
+	NodeID lhs = phi->getResID();
+	u32_t numOps = phi->getOpVarNum();
+	assert(numOps > 0 && "Phi must have at least one operand");
+
+	// AE: join all incoming operand values
+	AbstractValue mergedValue = as[phi->getOpVarID(0)];
+	for (u32_t i = 1; i < numOps; ++i) {
+		mergedValue.join_with(as[phi->getOpVarID(i)]);
+	}
+	as[lhs] = mergedValue;
+
+	// Debug: print abstract state after this update
+	as.printAbstractState();
 }
 
 /// TODO: handle GepStmt `lhs = rhs + off` and detect buffer overflow
@@ -163,8 +201,6 @@ void AbstractExecution::bufOverflowDetection(const SVF::SVFStmt* stmt) {
 			updateGepObjOffsetFromBase(as, as[lhs].getAddrs(), as[rhs].getAddrs(), as.getByteOffset(gep));
 
 			/// TODO: your code starts from here
-
-			
 		}
 	}
 }
@@ -193,8 +229,6 @@ void AbstractExecution::handleICFGCycle(const ICFGCycleWTO* cycle) {
 		s32_t widen_delay = Options::WidenDelay();
 		bool increasing = true;
 		/// TODO: your code starts from here
-
-		
 	}
 }
 
