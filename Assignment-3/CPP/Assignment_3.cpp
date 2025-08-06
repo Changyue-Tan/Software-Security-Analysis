@@ -32,6 +32,14 @@
 using namespace SVF;
 using namespace SVFUtil;
 
+// Define a debug logging macro for consistency
+#define DEBUG_LOG(msg)                                                                                                 \
+	do {                                                                                                               \
+		if (1) {                                                                                                       \
+			std::cout << msg << std::endl;                                                                             \
+		}                                                                                                              \
+	} while (0)
+
 /// TODO : Implement the state updates for Copy, Binary, Store, Load, Gep, Phi
 void AbstractExecution::updateStateOnCopy(const CopyStmt* copy) {
 	/// TODO: your code starts from here
@@ -41,8 +49,10 @@ void AbstractExecution::updateStateOnCopy(const CopyStmt* copy) {
 
 	NodeID lhs = copy->getLHSVarID();
 	NodeID rhs = copy->getRHSVarID();
+
 	as[lhs] = as[rhs];
-	std::cout << "[Copy] Var" << lhs << " = Var" << rhs << " : " << as[lhs].toString() << std::endl;
+
+	DEBUG_LOG("[Copy] Var" << lhs << " ← Var" << rhs << " | Value: " << as[lhs].toString());
 }
 
 /// Find the comparison predicates in "class BinaryOPStmt:OpCode" under SVF/svf/include/SVFIR/SVFStatements.h
@@ -75,16 +85,14 @@ void AbstractExecution::updateStateOnBinary(const BinaryOPStmt* binary) {
 		case BinaryOPStmt::Xor: result = v1 ^ v2; break;
 		case BinaryOPStmt::Shl: result = v1 << v2; break;
 		case BinaryOPStmt::AShr: result = v1 >> v2; break;
-		case BinaryOPStmt::LShr:
-		default:
-			// Fallback for floating‐point, unsigned shifts, etc.
-			result = IntervalValue::top();
-			break;
+		default: result = IntervalValue::top(); break;
 		}
 
 		as[lhs] = result;
-
-		std::cout << "[Binary] Var" << lhs << " = " << result.toString() << "\n";
+		DEBUG_LOG("[Binary] Var" << lhs << " = " << result.toString() << " | Opcode: " << binary->getOpcode());
+	}
+	else {
+		DEBUG_LOG("[Binary] Skipped: Missing operands in abstract state");
 	}
 }
 
@@ -98,28 +106,32 @@ void AbstractExecution::updateStateOnStore(const StoreStmt* store) {
 	NodeID valID = store->getRHSVarID();
 
 	if (!as.inVarToAddrsTable(ptrID)) {
-		std::cout << "[Store] Pointer Var" << ptrID << " not in address table!" << std::endl;
+		DEBUG_LOG("[Store] Skipped: Pointer Var" << ptrID << " not in address table");
 		return;
 	}
 
 	AddressValue addrVal = as[ptrID].getAddrs();
 	AbstractValue valueToStore = as[valID];
 
-	for (u32_t idx : addrVal.getVals()) {
-		u32_t addrID = idx; // internal address ID
-		u32_t memAddr = AddressValue::getVirtualMemAddress(addrID);
-		std::cout << "[Store] Storing to internal AddrID " << addrID << " (virtual 0x" << std::hex << memAddr
-		          << std::dec << ") = " << valueToStore.toString() << " (from Var" << valID << ")" << std::endl;
+	for (u32_t rawAddr : addrVal.getVals()) {
+		// Map the raw virtual address back to your internal addrID
+		u32_t addrID = as.getIDFromAddr(rawAddr);
+
+		DEBUG_LOG("[Store] Writing Var" << valID << " → addrID " << addrID << " (virt 0x" << std::hex << rawAddr
+		                                << std::dec << ")"
+		                                << " | Value: " << valueToStore.toString());
 
 		if (valueToStore.isInterval()) {
-			std::cout << "[Store] : storing interval value!" << std::endl;
+			DEBUG_LOG("  [Store Info] Type: Interval Value");
 		}
 		else if (valueToStore.isAddr()) {
-			std::cout << "[Store] : storing address value!" << std::endl;
+			DEBUG_LOG("  [Store Info] Type: Address Value");
 		}
 
+		// Actually perform the store into your abstract memory at addrID
 		as.storeValue(addrID, valueToStore);
-		std::cout << "[Store] -> AEState::storeValue(" << addrID << ") updated." << std::endl;
+
+		DEBUG_LOG("  [Store Info] AEState::storeValue(" << addrID << ") updated");
 	}
 }
 
@@ -129,11 +141,10 @@ void AbstractExecution::updateStateOnLoad(const LoadStmt* load) {
 	const ICFGNode* node = load->getICFGNode();
 	AbstractState& as = getAbsStateFromTrace(node);
 
-	NodeID ptrID = load->getRHSVarID(); // pointer
-	NodeID lhsID = load->getLHSVarID(); // destination var
+	NodeID ptrID = load->getRHSVarID();
+	NodeID lhsID = load->getLHSVarID();
 
-	// AE: join values from all memory locations pointed to
-	AbstractValue result;
+	AbstractValue result; // should start as ⊥
 	if (as.inVarToAddrsTable(ptrID)) {
 		AddressValue addrs = as[ptrID].getAddrs();
 		for (u32_t addr : addrs.getVals()) {
@@ -142,10 +153,9 @@ void AbstractExecution::updateStateOnLoad(const LoadStmt* load) {
 			}
 		}
 	}
-	as[lhsID] = result;
 
-	// Debug: print abstract state after this update
-	as.printAbstractState();
+	as[lhsID] = result;
+	DEBUG_LOG("[Load] Var" << lhsID << " ← *Var" << ptrID << " | Result: " << result.toString());
 }
 
 void AbstractExecution::updateStateOnGep(const GepStmt* gep) {
@@ -157,13 +167,12 @@ void AbstractExecution::updateStateOnGep(const GepStmt* gep) {
 	NodeID lhs = gep->getLHSVarID();
 	NodeID rhs = gep->getRHSVarID();
 
-	// AE: compute element index, then GEP addresses
 	IntervalValue index = as.getElementIndex(gep);
 	AddressValue gepAddrs = as.getGepObjAddrs(rhs, index);
 	as[lhs] = AbstractValue(gepAddrs);
 
-	// Debug: print abstract state after this update
-	as.printAbstractState();
+	DEBUG_LOG("[GEP] Var" << lhs << " = GEP(Var" << rhs << ", index=" << index.toString() << ") | AddrSet: " << std::hex
+	                      << gepAddrs.toString() << std::dec);
 }
 
 void AbstractExecution::updateStateOnPhi(const PhiStmt* phi) {
@@ -176,15 +185,13 @@ void AbstractExecution::updateStateOnPhi(const PhiStmt* phi) {
 	u32_t numOps = phi->getOpVarNum();
 	assert(numOps > 0 && "Phi must have at least one operand");
 
-	// AE: join all incoming operand values
 	AbstractValue mergedValue = as[phi->getOpVarID(0)];
 	for (u32_t i = 1; i < numOps; ++i) {
 		mergedValue.join_with(as[phi->getOpVarID(i)]);
 	}
 	as[lhs] = mergedValue;
 
-	// Debug: print abstract state after this update
-	as.printAbstractState();
+	DEBUG_LOG("[Phi] Var" << lhs << " = φ(" << numOps << " operands) | Value: " << mergedValue.toString());
 }
 
 /// TODO: handle GepStmt `lhs = rhs + off` and detect buffer overflow
