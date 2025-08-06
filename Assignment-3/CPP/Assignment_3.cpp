@@ -32,14 +32,6 @@
 using namespace SVF;
 using namespace SVFUtil;
 
-// Define a debug logging macro for consistency
-#define DEBUG_LOG(msg)                                                                                                 \
-	do {                                                                                                               \
-		if (1) {                                                                                                       \
-			std::cout << msg << std::endl;                                                                             \
-		}                                                                                                              \
-	} while (0)
-
 /// TODO : Implement the state updates for Copy, Binary, Store, Load, Gep, Phi
 void AbstractExecution::updateStateOnCopy(const CopyStmt* copy) {
 	/// TODO: your code starts from here
@@ -51,8 +43,6 @@ void AbstractExecution::updateStateOnCopy(const CopyStmt* copy) {
 	NodeID rhs = copy->getRHSVarID();
 
 	as[lhs] = as[rhs];
-
-	DEBUG_LOG("[Copy] Var" << lhs << " ← Var" << rhs << " | Value: " << as[lhs].toString());
 }
 
 /// Find the comparison predicates in "class BinaryOPStmt:OpCode" under SVF/svf/include/SVFIR/SVFStatements.h
@@ -89,10 +79,6 @@ void AbstractExecution::updateStateOnBinary(const BinaryOPStmt* binary) {
 		}
 
 		as[lhs] = result;
-		DEBUG_LOG("[Binary] Var" << lhs << " = " << result.toString() << " | Opcode: " << binary->getOpcode());
-	}
-	else {
-		DEBUG_LOG("[Binary] Skipped: Missing operands in abstract state");
 	}
 }
 
@@ -105,33 +91,14 @@ void AbstractExecution::updateStateOnStore(const StoreStmt* store) {
 	NodeID ptrID = store->getLHSVarID();
 	NodeID valID = store->getRHSVarID();
 
-	if (!as.inVarToAddrsTable(ptrID)) {
-		DEBUG_LOG("[Store] Skipped: Pointer Var" << ptrID << " not in address table");
-		return;
-	}
-
 	AddressValue addrVal = as[ptrID].getAddrs();
 	AbstractValue valueToStore = as[valID];
 
 	for (u32_t rawAddr : addrVal.getVals()) {
 		// Map the raw virtual address back to your internal addrID
 		u32_t addrID = as.getIDFromAddr(rawAddr);
-
-		DEBUG_LOG("[Store] Writing Var" << valID << " → addrID " << addrID << " (virt 0x" << std::hex << rawAddr
-		                                << std::dec << ")"
-		                                << " | Value: " << valueToStore.toString());
-
-		if (valueToStore.isInterval()) {
-			DEBUG_LOG("  [Store Info] Type: Interval Value");
-		}
-		else if (valueToStore.isAddr()) {
-			DEBUG_LOG("  [Store Info] Type: Address Value");
-		}
-
 		// Actually perform the store into your abstract memory at addrID
 		as.storeValue(addrID, valueToStore);
-
-		DEBUG_LOG("  [Store Info] AEState::storeValue(" << addrID << ") updated");
 	}
 }
 
@@ -155,7 +122,6 @@ void AbstractExecution::updateStateOnLoad(const LoadStmt* load) {
 	}
 
 	as[lhsID] = result;
-	DEBUG_LOG("[Load] Var" << lhsID << " ← *Var" << ptrID << " | Result: " << result.toString());
 }
 
 void AbstractExecution::updateStateOnGep(const GepStmt* gep) {
@@ -170,9 +136,6 @@ void AbstractExecution::updateStateOnGep(const GepStmt* gep) {
 	IntervalValue index = as.getElementIndex(gep);
 	AddressValue gepAddrs = as.getGepObjAddrs(rhs, index);
 	as[lhs] = AbstractValue(gepAddrs);
-
-	DEBUG_LOG("[GEP] Var" << lhs << " = GEP(Var" << rhs << ", index=" << index.toString() << ") | AddrSet: " << std::hex
-	                      << gepAddrs.toString() << std::dec);
 }
 
 void AbstractExecution::updateStateOnPhi(const PhiStmt* phi) {
@@ -190,8 +153,6 @@ void AbstractExecution::updateStateOnPhi(const PhiStmt* phi) {
 		mergedValue.join_with(as[phi->getOpVarID(i)]);
 	}
 	as[lhs] = mergedValue;
-
-	DEBUG_LOG("[Phi] Var" << lhs << " = φ(" << numOps << " operands) | Value: " << mergedValue.toString());
 }
 
 /// TODO: handle GepStmt `lhs = rhs + off` and detect buffer overflow
