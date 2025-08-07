@@ -88,11 +88,14 @@ void AbstractExecution::updateStateOnStore(const StoreStmt* store) {
 	const ICFGNode* node = store->getICFGNode();
 	AbstractState& as = getAbsStateFromTrace(node);
 
-	NodeID ptrID = store->getLHSVarID();
-	NodeID valID = store->getRHSVarID();
+	auto ptrID = store->getLHSVarID();
+	auto valID = store->getRHSVarID();
 
-	AddressValue addrVal = as[ptrID].getAddrs();
-	AbstractValue valueToStore = as[valID];
+	auto addrVal = as[ptrID].getAddrs();
+	auto valueToStore = as[valID];
+
+	// std::cout << "before store\n";
+	// as.printAbstractState();
 
 	for (u32_t rawAddr : addrVal.getVals()) {
 		// Map the raw virtual address back to your internal addrID
@@ -100,28 +103,24 @@ void AbstractExecution::updateStateOnStore(const StoreStmt* store) {
 		// Actually perform the store into your abstract memory at addrID
 		as.storeValue(addrID, valueToStore);
 	}
+	std::cout << std::dec;
+	std::cout << "after store from " << valID << " to " << ptrID << "\n";
+	as.printAbstractState();
 }
 
 void AbstractExecution::updateStateOnLoad(const LoadStmt* load) {
 	/// TODO: your code starts from here
 
-	const ICFGNode* node = load->getICFGNode();
-	AbstractState& as = getAbsStateFromTrace(node);
+	const auto* node = load->getICFGNode();
+	auto& as = getAbsStateFromTrace(node);
 
-	NodeID ptrID = load->getRHSVarID();
-	NodeID lhsID = load->getLHSVarID();
+	auto ptrID = load->getRHSVarID();
+	auto lhsID = load->getLHSVarID();
 
-	AbstractValue result; // should start as ⊥
-	if (as.inVarToAddrsTable(ptrID)) {
-		AddressValue addrs = as[ptrID].getAddrs();
-		for (u32_t addr : addrs.getVals()) {
-			if (as.inAddrToValTable(addr)) {
-				result.join_with(as[addr]);
-			}
-		}
-	}
-
-	as[lhsID] = result;
+	as[lhsID] = as.loadValue(ptrID);
+	std::cout << std::dec;
+	std::cout << "after load from " << ptrID << " to " << lhsID << "\n";
+	as.printAbstractState();
 }
 
 void AbstractExecution::updateStateOnGep(const GepStmt* gep) {
@@ -196,7 +195,54 @@ void AbstractExecution::handleICFGCycle(const ICFGCycleWTO* cycle) {
 		// set -widen-delay
 		s32_t widen_delay = Options::WidenDelay();
 		bool increasing = true;
-		/// TODO: your code starts from here
+		/// TODO: your code starts frok,kk;j.m here
+
+		const ICFGNode* head = cycle->head()->getICFGNode();
+		int i = 0;
+
+		while (true) {
+			AbstractState as_pre = preAbsTrace[head]; // Save current abstract state
+
+			handleICFGNode(head); // Analyze the head node
+
+			AbstractState as_cur = preAbsTrace[head]; // Get updated abstract state
+
+			if (i >= widen_delay) {
+				if (increasing) {
+					// Widening
+					AbstractState widened = as_pre.widening(as_cur);
+					preAbsTrace[head] = widened;
+
+					if (widened.equals(as_pre)) {
+						increasing = false;
+						continue;
+					}
+				}
+				else {
+					// Narrowing
+					AbstractState narrowed = as_pre.narrowing(as_cur);
+					preAbsTrace[head] = narrowed;
+
+					if (narrowed.equals(as_pre)) {
+						break;
+					}
+				}
+			}
+
+			++i;
+		}
+
+		// After reaching fixed-point, analyze the rest of the components in the cycle
+		for (const ICFGWTOComp* comp : cycle->getWTOComponents()) {
+			if (const auto subCycle = dyn_cast<ICFGCycleWTO>(comp)) {
+				handleICFGCycle(subCycle);
+			}
+			else if (const auto singleton = dyn_cast<ICFGSingletonWTO>(comp)) {
+				handleICFGNode(singleton->getICFGNode());
+			}
+		}
+
+		return;
 	}
 }
 

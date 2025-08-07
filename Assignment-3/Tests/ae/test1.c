@@ -1,7 +1,3 @@
-    //
-// Created by Jiawei Wang on 1/17/22.
-//
-
 #include "stdbool.h"
 extern void svf_assert(bool);
 #define LEN 10
