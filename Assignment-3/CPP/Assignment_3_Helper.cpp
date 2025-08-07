@@ -74,7 +74,6 @@ Map<s32_t, s32_t> _switch_lhsrhs_predicate = {
     {CmpStmt::Predicate::ICMP_SGE, CmpStmt::Predicate::ICMP_SLE}, // >= -> <=
 };
 
-
 IntervalValue AbstractExecution::getAccessOffset(NodeID objId, const GepStmt* gep) {
 	auto obj = svfir->getGNode(objId);
 	AbstractState& as = getAbsStateFromTrace(gep->getICFGNode());
@@ -90,7 +89,7 @@ IntervalValue AbstractExecution::getAccessOffset(NodeID objId, const GepStmt* ge
 		    bufOverflowHelper.getGepObjOffsetFromBase(SVFUtil::cast<GepObjVar>(obj)) + as.getByteOffset(gep);
 		return accessOffset;
 	}
-	else{
+	else {
 		assert(SVFUtil::isa<DummyObjVar>(obj) && "What other types of object?");
 		return IntervalValue::top();
 	}
@@ -108,7 +107,8 @@ bool AbstractExecution::isExternalCallForAssignment(const SVF::FunObjVar* func) 
 	Set<std::string> extFuncs = {"mem_insert", "str_insert"};
 	if (extFuncs.find(func->getName()) != extFuncs.end()) {
 		return true;
-	} else {
+	}
+	else {
 		return false;
 	}
 }
@@ -144,13 +144,13 @@ void AbstractExecution::initWTO() {
 	// Initialize WTO for each function in the module
 	for (const auto& item : *callGraph) {
 		const FunObjVar* fun = item.second->getFunction();
-		if(fun->isDeclaration())
+		if (fun->isDeclaration())
 			continue;
 		auto* wto = new ICFGWTO(icfg, icfg->getFunEntryICFGNode(fun));
 		wto->init();
 		funcToWTO[fun] = wto;
 	}
-	for (auto fun: funcToWTO) {
+	for (auto fun : funcToWTO) {
 		for (const ICFGWTOComp* comp : fun.second->getWTOComponents()) {
 			if (const ICFGCycleWTO* cycle = SVFUtil::dyn_cast<ICFGCycleWTO>(comp)) {
 				cycleHeadToCycle[cycle->head()->getICFGNode()] = cycle;
@@ -171,9 +171,10 @@ void AbstractExecution::initWTO() {
  * @param objAddrs The set of addresses for the object
  * @param offset The interval value representing the offset
  */
-void AbstractExecution::updateGepObjOffsetFromBase(AbstractState& as, SVF::AddressValue gepAddrs, SVF::AddressValue objAddrs,
-                                                   SVF::IntervalValue offset)
-{
+void AbstractExecution::updateGepObjOffsetFromBase(AbstractState& as,
+                                                   SVF::AddressValue gepAddrs,
+                                                   SVF::AddressValue objAddrs,
+                                                   SVF::IntervalValue offset) {
 	for (const auto& objAddr : objAddrs) {
 		NodeID objId = as.getIDFromAddr(objAddr);
 		auto obj = svfir->getGNode(objId);
@@ -216,41 +217,49 @@ void AbstractExecution::updateGepObjOffsetFromBase(AbstractState& as, SVF::Addre
  * @return bool True if the state propagation is feasible and successful, false otherwise
  */
 bool AbstractExecution::mergeStatesFromPredecessors(const ICFGNode* block, AbstractState& as) {
-	u32_t inEdgeNum = 0; // Initialize the number of incoming edges with feasible states
+	//  std::cout << "\n[Merge] Merging states for block: " << block->getId() << " , with string: \n" << block->toString() << std::endl;
+
+	u32_t inEdgeNum = 0;
 	as = AbstractState();
-	// Iterate over all incoming edges of the given block
+
 	for (auto& edge : block->getInEdges()) {
-		// Check if the source node of the edge has a post-execution state recorded
-		if (postAbsTrace.find(edge->getSrcNode()) != postAbsTrace.end()) {
+		const ICFGNode* src = edge->getSrcNode();
+		//  std::cout << "[Merge] Checking incoming edge from node: " << src->getId() << std::endl;
+
+		if (postAbsTrace.find(src) != postAbsTrace.end()) {
 			const IntraCFGEdge* intraCfgEdge = SVFUtil::dyn_cast<IntraCFGEdge>(edge);
 
-			// If the edge is an intra-block edge and has a condition
 			if (intraCfgEdge && intraCfgEdge->getCondition()) {
-				AbstractState tmpEs = postAbsTrace[edge->getSrcNode()];
-				// Check if the branch condition is feasible
+				AbstractState tmpEs = postAbsTrace[src];
 				if (isBranchFeasible(intraCfgEdge, tmpEs)) {
-					as.joinWith(tmpEs); // Merge the state with the current state
+					//  std::cout << "[Merge] Feasible conditional edge. Merging state from node: " << src->getId()
+					//           << std::endl;
+					as.joinWith(tmpEs);
 					inEdgeNum++;
 				}
-				// If branch is not feasible, do nothing
+				else {
+					//  std::cout << "[Merge] Infeasible branch from node: " << src->getId() << std::endl;
+				}
 			}
 			else {
-				// For non-conditional edges, directly merge the state
-				as.joinWith(postAbsTrace[edge->getSrcNode()]);
+				//  std::cout << "[Merge] Merging unconditional state from node: " << src->getId() << std::endl;
+				as.joinWith(postAbsTrace[src]);
 				inEdgeNum++;
 			}
 		}
-		// If no post-execution state is recorded for the source node, do nothing
+		else {
+			// std::cout << "[Merge] No post-state found for source node: " << src->getId() << std::endl;
+		}
 	}
 
-	// If no incoming edges have feasible states, return false
 	if (inEdgeNum == 0) {
+		// std::cout << "[Merge] No feasible incoming states found for block: " << block->getId() << std::endl;
 		return false;
 	}
-	else {
-		return true;
-	}
-	assert(false && "implement this part"); // This part should not be reached
+
+	// std::cout << "[Merge] Successfully merged " << inEdgeNum << " incoming state(s) for block: " << block->getId()
+	//           << std::endl;
+	return true;
 }
 
 bool AbstractExecution::isCmpBranchFeasible(const CmpStmt* cmpStmt, s64_t succ, AbstractState& as) {
@@ -500,7 +509,7 @@ void AbstractExecution::handleGlobalNode() {
 	}
 }
 
-/// If we have stub calls as ground truths in the program, including svf_assert and OVERFLOW, 
+/// If we have stub calls as ground truths in the program, including svf_assert and OVERFLOW,
 /// make sure they are fully verified/checked.
 void AbstractExecution::ensureAllAssertsValidated() {
 	u32_t svf_assert_to_be_verified = 0;
@@ -528,10 +537,9 @@ void AbstractExecution::ensureAllAssertsValidated() {
 		}
 	}
 
-	assert(overflow_assert_to_be_verified <= bufOverflowHelper.getBugReporter().getBugSet().size() &&
-		       "The number of stub asserts (ground truth) should <= the number of overflow reported");
+	assert(overflow_assert_to_be_verified <= bufOverflowHelper.getBugReporter().getBugSet().size()
+	       && "The number of stub asserts (ground truth) should <= the number of overflow reported");
 }
-
 
 /**
  * @brief The driver program
@@ -555,7 +563,7 @@ void AbstractExecution::analyse() {
 			AbstractState& as = getAbsStateFromTrace(icfg->getGlobalICFGNode());
 			as[fun->getArg(i)->getId()] = IntervalValue::top();
 		}
-		//assert the main function exist
+		// assert the main function exist
 		assert(svfir->getFunObjVar("main") != nullptr && "Main function not found");
 		handleFunction(svfir->getICFG()->getFunEntryICFGNode(svfir->getFunObjVar("main")));
 	}
@@ -575,6 +583,11 @@ void AbstractExecution::analyse() {
  * @return True if the abstract state has changed, false if it has reached a fixpoint or is infeasible
  */
 bool AbstractExecution::handleICFGNode(const ICFGNode* node) {
+	std::cout << "[ICFG] Node " << node->getId() << " (" << node->getName() << "), has statements:\n";
+	for (const auto* stmt : node->getSVFStmts()) {
+		std::cout << "   - " << stmt->toString() << "\n";
+	}
+
 	AbstractState tmpEs;
 	bool is_feasible = mergeStatesFromPredecessors(node, tmpEs);
 	if (!is_feasible) {
@@ -583,7 +596,7 @@ bool AbstractExecution::handleICFGNode(const ICFGNode* node) {
 	}
 	preAbsTrace[node] = tmpEs;
 	// Store the last abstract state, used to check if the abstract state has reached a fixpoint
-	AbstractState last_as = postAbsTrace[node]; 
+	AbstractState last_as = postAbsTrace[node];
 	postAbsTrace[node] = preAbsTrace[node];
 	for (const SVFStmt* stmt : node->getSVFStmts()) {
 		updateAbsState(stmt);
@@ -591,7 +604,7 @@ bool AbstractExecution::handleICFGNode(const ICFGNode* node) {
 	}
 
 	if (const CallICFGNode* callNode = SVFUtil::dyn_cast<CallICFGNode>(node)) {
-			handleCallSite(callNode);
+		handleCallSite(callNode);
 	}
 	// If the abstract state is the same as the last abstract state, return false because we have reached fixpoint
 	if (postAbsTrace[node] == last_as) {
@@ -608,61 +621,61 @@ bool AbstractExecution::handleICFGNode(const ICFGNode* node) {
  * @param stmt The SVF statement for which the state needs to be updated
  */
 void AbstractExecution::updateAbsState(const SVFStmt* stmt) {
-	// Handle address statements
 	if (const AddrStmt* addr = SVFUtil::dyn_cast<AddrStmt>(stmt)) {
+		std::cout << "[Log] AddrStmt encountered.\n";
 		updateStateOnAddr(addr);
 	}
-	// Handle binary operation statements
 	else if (const BinaryOPStmt* binary = SVFUtil::dyn_cast<BinaryOPStmt>(stmt)) {
+		std::cout << "[Log] BinaryOPStmt encountered.\n";
 		updateStateOnBinary(binary);
 	}
-	// Handle comparison statements
 	else if (const CmpStmt* cmp = SVFUtil::dyn_cast<CmpStmt>(stmt)) {
+		std::cout << "[Log] CmpStmt encountered.\n";
 		updateStateOnCmp(cmp);
 	}
-	// Handle load statements
 	else if (const LoadStmt* load = SVFUtil::dyn_cast<LoadStmt>(stmt)) {
+		std::cout << "[Log] LoadStmt encountered.\n";
 		updateStateOnLoad(load);
 	}
-	// Handle store statements
 	else if (const StoreStmt* store = SVFUtil::dyn_cast<StoreStmt>(stmt)) {
+		std::cout << "[Log] StoreStmt encountered.\n";
 		updateStateOnStore(store);
 	}
-	// Handle copy statements
 	else if (const CopyStmt* copy = SVFUtil::dyn_cast<CopyStmt>(stmt)) {
+		std::cout << "[Log] CopyStmt encountered.\n";
 		updateStateOnCopy(copy);
 	}
-	// Handle GEP (GetElementPtr) statements
 	else if (const GepStmt* gep = SVFUtil::dyn_cast<GepStmt>(stmt)) {
+		std::cout << "[Log] GepStmt encountered.\n";
 		updateStateOnGep(gep);
 	}
-	// Handle phi statements
 	else if (const PhiStmt* phi = SVFUtil::dyn_cast<PhiStmt>(stmt)) {
+		std::cout << "[Log] PhiStmt encountered.\n";
 		updateStateOnPhi(phi);
 	}
-	// Handle call procedure entries
 	else if (const CallPE* callPE = SVFUtil::dyn_cast<CallPE>(stmt)) {
+		std::cout << "[Log] CallPE encountered.\n";
 		updateStateOnCall(callPE);
 	}
-	// Handle return procedure entries
 	else if (const RetPE* retPE = SVFUtil::dyn_cast<RetPE>(stmt)) {
+		std::cout << "[Log] RetPE encountered.\n";
 		updateStateOnRet(retPE);
 	}
-	// Handle select statements
 	else if (const SelectStmt* select = SVFUtil::dyn_cast<SelectStmt>(stmt)) {
+		std::cout << "[Log] SelectStmt encountered.\n";
 		updateStateOnSelect(select);
 	}
-	// Handle unary operations and branch statements (no action needed)
-	else if (SVFUtil::isa<UnaryOPStmt>(stmt) || SVFUtil::isa<BranchStmt>(stmt)) {
-		// Nothing needs to be done here as BranchStmt is handled in hasBranchES
+	else if (SVFUtil::isa<UnaryOPStmt>(stmt)) {
+		std::cout << "[Log] UnaryOPStmt encountered.\n";
 	}
-	// Assert false for unsupported statement types
+	else if (SVFUtil::isa<BranchStmt>(stmt)) {
+		std::cout << "[Log] BranchStmt encountered.\n";
+	}
 	else {
+		std::cerr << "[Error] Unknown statement type encountered.\n";
 		assert(false && "implement this part");
 	}
 }
-
-
 /**
  * @brief Handle a call site in the control flow graph
  *
@@ -677,11 +690,11 @@ void AbstractExecution::handleCallSite(const CallICFGNode* callNode) {
 	std::string fun_name = callee->getName();
 	if (fun_name == "OVERFLOW" || fun_name == "svf_assert" || fun_name == "svf_assert_eq") {
 		handleStubFunctions(callNode);
-	} 
+	}
 	else if (fun_name == "nd" || fun_name == "rand") {
 		NodeID lhsId = callNode->getRetICFGNode()->getActualRet()->getId();
 		postAbsTrace[callNode][lhsId] = AbstractValue(IntervalValue::top());
-	} 
+	}
 	else if (isExternalCallForAssignment(callee)) {
 		// implement external calls for the assignment
 		updateStateOnExtCall(callNode);
@@ -702,10 +715,10 @@ void AbstractExecution::handleCallSite(const CallICFGNode* callNode) {
 
 /**
  * @brief Get the next nodes of a node
- * 
+ *
  * Returns the next nodes of a node that are inside the same function.
  * And if CallICFGNode, shortcut to the RetICFGNode	.
- * 
+ *
  * @param node The node to get the next nodes of
  * @return The next nodes of the node
  */
@@ -728,12 +741,12 @@ std::vector<const ICFGNode*> AbstractExecution::getNextNodes(const ICFGNode* nod
 
 /**
  * @brief Get the next nodes of a cycle
- * 
+ *
  * Returns the next nodes of cycle components that are outside the cycle.
  * Inner cycles are skipped since their next nodes cannot be outside the outer cycle.
  * And Inner cycles are handled in the outer cycle.
  * Only nodes that point outside the cycle are included in cycleNext.
- * 
+ *
  * @param cycle The cycle to get the next nodes of
  * @return The next nodes of the cycle
  */
@@ -744,7 +757,8 @@ std::vector<const ICFGNode*> AbstractExecution::getNextNodesOfCycle(const ICFGCy
 	for (const ICFGWTOComp* comp : cycle->getWTOComponents()) {
 		if (const ICFGSingletonWTO* singleton = SVFUtil::dyn_cast<ICFGSingletonWTO>(comp)) {
 			cycleNodes.insert(singleton->getICFGNode());
-		} else if (const ICFGCycleWTO* subCycle = SVFUtil::dyn_cast<ICFGCycleWTO>(comp)) {
+		}
+		else if (const ICFGCycleWTO* subCycle = SVFUtil::dyn_cast<ICFGCycleWTO>(comp)) {
 			cycleNodes.insert(subCycle->head()->getICFGNode());
 		}
 	}
@@ -765,17 +779,17 @@ std::vector<const ICFGNode*> AbstractExecution::getNextNodesOfCycle(const ICFGCy
 					outEdges.push_back(nextNode);
 				}
 			}
-		} else if (const ICFGCycleWTO* subCycle = SVFUtil::dyn_cast<ICFGCycleWTO>(comp)) {
-			// skip inner cycle inside the outer cycle, because 1) it will be handled in the outer cycle. 
-			//2) its next nodes won't be outside the outer cycle.
+		}
+		else if (const ICFGCycleWTO* subCycle = SVFUtil::dyn_cast<ICFGCycleWTO>(comp)) {
+			// skip inner cycle inside the outer cycle, because 1) it will be handled in the outer cycle.
+			// 2) its next nodes won't be outside the outer cycle.
 			continue;
 		}
 	}
 	return outEdges;
 }
 
-void AbstractExecution::handleFunction(const ICFGNode* funEntry)
- {
+void AbstractExecution::handleFunction(const ICFGNode* funEntry) {
 	FIFOWorkList<const ICFGNode*> worklist;
 	worklist.push(funEntry);
 	while (!worklist.empty()) {
@@ -842,17 +856,15 @@ void AbstractExecution::handleStubFunctions(const SVF::CallICFGNode* callNode) {
 		}
 		return;
 	}
-	else if (callNode->getCalledFunction()->getName() == "svf_assert_eq")  {
+	else if (callNode->getCalledFunction()->getName() == "svf_assert_eq") {
 		u32_t arg0 = callNode->getArgument(0)->getId();
 		u32_t arg1 = callNode->getArgument(1)->getId();
 		AbstractState& as = getAbsStateFromTrace(callNode);
-		if (as[arg0].getInterval().equals(as[arg1].getInterval()))
-		{
+		if (as[arg0].getInterval().equals(as[arg1].getInterval())) {
 			SVFUtil::errs() << SVFUtil::sucMsg("The assertion is successfully verified!!\n");
 		}
-		else
-		{
-			SVFUtil::errs() <<"svf_assert_eq Fail. " << callNode->toString() << "\n";
+		else {
+			SVFUtil::errs() << "svf_assert_eq Fail. " << callNode->toString() << "\n";
 			assert(false);
 		}
 		return;
@@ -887,17 +899,15 @@ void AbstractExecution::handleStubFunctions(const SVF::CallICFGNode* callNode) {
 				std::cerr << "Your implementation successfully detected the buffer overflow\n";
 			}
 			else {
-				SVFUtil::errs() << "Your implementation failed to detect the buffer overflow!"
-				                << callNode->toString() << "\n";
+				SVFUtil::errs() << "Your implementation failed to detect the buffer overflow!" << callNode->toString()
+				                << "\n";
 				assert(false);
 			}
 		}
 		else {
-			SVFUtil::errs() << "Your implementation failed to detect the buffer overflow!"
-			                << callNode->toString() << "\n";
+			SVFUtil::errs() << "Your implementation failed to detect the buffer overflow!" << callNode->toString()
+			                << "\n";
 			assert(false);
 		}
 	}
 }
-
-

@@ -43,6 +43,9 @@ void AbstractExecution::updateStateOnCopy(const CopyStmt* copy) {
 	NodeID rhs = copy->getRHSVarID();
 
 	as[lhs] = as[rhs];
+	// std::cout << std::dec;
+	// std::cout << "after copy from " << rhs << " to " << lhs << "\n";
+	// as.printAbstractState();
 }
 
 /// Find the comparison predicates in "class BinaryOPStmt:OpCode" under SVF/svf/include/SVFIR/SVFStatements.h
@@ -58,28 +61,30 @@ void AbstractExecution::updateStateOnBinary(const BinaryOPStmt* binary) {
 	NodeID op1 = binary->getOpVarID(0);
 	NodeID op2 = binary->getOpVarID(1);
 
-	// only if both operands have interval values
-	if (as.inVarToValTable(op1) && as.inVarToValTable(op2)) {
-		const IntervalValue& v1 = as[op1].getInterval();
-		const IntervalValue& v2 = as[op2].getInterval();
-		IntervalValue result;
+	const IntervalValue& v1 = as[op1].getInterval();
+	const IntervalValue& v2 = as[op2].getInterval();
+	IntervalValue result;
 
-		switch (binary->getOpcode()) {
-		case BinaryOPStmt::Add: result = v1 + v2; break;
-		case BinaryOPStmt::Sub: result = v1 - v2; break;
-		case BinaryOPStmt::Mul: result = v1 * v2; break;
-		case BinaryOPStmt::SDiv: result = v1 / v2; break;
-		case BinaryOPStmt::SRem: result = v1 % v2; break;
-		case BinaryOPStmt::And: result = v1 & v2; break;
-		case BinaryOPStmt::Or: result = v1 | v2; break;
-		case BinaryOPStmt::Xor: result = v1 ^ v2; break;
-		case BinaryOPStmt::Shl: result = v1 << v2; break;
-		case BinaryOPStmt::AShr: result = v1 >> v2; break;
-		default: result = IntervalValue::top(); break;
-		}
-
-		as[lhs] = result;
+	auto opCode = binary->getOpcode();
+	switch (opCode) {
+	case BinaryOPStmt::Add: result = v1 + v2; break;
+	case BinaryOPStmt::Sub: result = v1 - v2; break;
+	case BinaryOPStmt::Mul: result = v1 * v2; break;
+	case BinaryOPStmt::SDiv: result = v1 / v2; break;
+	case BinaryOPStmt::SRem: result = v1 % v2; break;
+	case BinaryOPStmt::And: result = v1 & v2; break;
+	case BinaryOPStmt::Or: result = v1 | v2; break;
+	case BinaryOPStmt::Xor: result = v1 ^ v2; break;
+	case BinaryOPStmt::Shl: result = v1 << v2; break;
+	case BinaryOPStmt::AShr: result = v1 >> v2; break;
+	default: result = IntervalValue::top(); break;
 	}
+	as[lhs] = result;
+	// std::cout << std::dec;
+	// std::cout << "after BinOp of " << opCode << " between VarID=" << op1 << " and VarID=" << op2 << " to VarID=" <<
+	// lhs
+	//           << "\n";
+	// as.printAbstractState();
 }
 
 void AbstractExecution::updateStateOnStore(const StoreStmt* store) {
@@ -94,7 +99,8 @@ void AbstractExecution::updateStateOnStore(const StoreStmt* store) {
 	auto addrVal = as[ptrID].getAddrs();
 	auto valueToStore = as[valID];
 
-	// std::cout << "before store\n";
+	// std::cout << std::dec;
+	// std::cout << "[Store] before store from VarID=" << valID << " to VarID=" << ptrID << "\n";
 	// as.printAbstractState();
 
 	for (u32_t rawAddr : addrVal.getVals()) {
@@ -103,9 +109,10 @@ void AbstractExecution::updateStateOnStore(const StoreStmt* store) {
 		// Actually perform the store into your abstract memory at addrID
 		as.storeValue(addrID, valueToStore);
 	}
-	std::cout << std::dec;
-	std::cout << "after store from " << valID << " to " << ptrID << "\n";
-	as.printAbstractState();
+
+	// std::cout << std::dec;
+	// std::cout << "[Store] after store from VarID=" << valID << " to VarID=" << ptrID << "\n";
+	// as.printAbstractState();
 }
 
 void AbstractExecution::updateStateOnLoad(const LoadStmt* load) {
@@ -118,9 +125,9 @@ void AbstractExecution::updateStateOnLoad(const LoadStmt* load) {
 	auto lhsID = load->getLHSVarID();
 
 	as[lhsID] = as.loadValue(ptrID);
-	std::cout << std::dec;
-	std::cout << "after load from " << ptrID << " to " << lhsID << "\n";
-	as.printAbstractState();
+	// std::cout << std::dec;
+	// std::cout << "[Load] after load from " << ptrID << " to " << lhsID << "\n";
+	// as.printAbstractState();
 }
 
 void AbstractExecution::updateStateOnGep(const GepStmt* gep) {
@@ -135,23 +142,49 @@ void AbstractExecution::updateStateOnGep(const GepStmt* gep) {
 	IntervalValue index = as.getElementIndex(gep);
 	AddressValue gepAddrs = as.getGepObjAddrs(rhs, index);
 	as[lhs] = AbstractValue(gepAddrs);
+	std::cout << "[Gep] called\n";
 }
 
 void AbstractExecution::updateStateOnPhi(const PhiStmt* phi) {
 	/// TODO: your code starts from here
 
-	const ICFGNode* node = phi->getICFGNode();
-	AbstractState& as = getAbsStateFromTrace(node);
+	// Locate the ICFG node where the phi lives,
+	// and get & modify its abstract state.
+	const ICFGNode* phiNode = phi->getICFGNode();
+	AbstractState& curState = getAbsStateFromTrace(phiNode);
 
+	// std::cout << "[Phi] updateStateOnPhi: processing PhiStmt at node " << phiNode << std::endl;
+
+	// Prepare to collect and join all incoming values.
 	NodeID lhs = phi->getResID();
 	u32_t numOps = phi->getOpVarNum();
-	assert(numOps > 0 && "Phi must have at least one operand");
+	AbstractValue merged;
 
-	AbstractValue mergedValue = as[phi->getOpVarID(0)];
-	for (u32_t i = 1; i < numOps; ++i) {
-		mergedValue.join_with(as[phi->getOpVarID(i)]);
+	// For each incoming edge i:
+	for (u32_t i = 0; i < numOps; ++i) {
+		// a) Find the predecessor node for operand i
+		const ICFGNode* predNode = phi->getOpICFGNode(i);
+		// b) Get that node's abstract state snapshot
+		AbstractState& predState = getAbsStateFromTrace(predNode);
+		// c) Extract the operand's value
+		NodeID varID = phi->getOpVarID(i);
+		AbstractValue value = predState[varID];
+
+		// std::cout << "[Phi]  operand " << i << " from node " << predNode << " (varID=" << varID
+		//           << "): " << value.toString() << std::endl;
+
+		if (i == 0) {
+			merged = value;
+		}
+		else {
+			merged.join_with(value);
+			// std::cout << "[Phi]  merged after operand " << i << ": " << merged.toString() << std::endl;
+		}
 	}
-	as[lhs] = mergedValue;
+
+	// Assign the joined result to the phi-node's state
+	curState[lhs] = merged;
+	// std::cout << "[Phi]  final merged value assigned to varID=" << lhs << ": " << merged.toString() << std::endl;
 }
 
 /// TODO: handle GepStmt `lhs = rhs + off` and detect buffer overflow
@@ -168,6 +201,25 @@ void AbstractExecution::bufOverflowDetection(const SVF::SVFStmt* stmt) {
 			updateGepObjOffsetFromBase(as, as[lhs].getAddrs(), as[rhs].getAddrs(), as.getByteOffset(gep));
 
 			/// TODO: your code starts from here
+
+			// Step 6: Iterate over all memory objects that 'rhs' points to
+			for (const auto& objAddr : as[rhs].getAddrs()) {
+				// Step 7-8: Get the internal SVF variable ID for this address
+				SVF::NodeID objId = as.getIDFromAddr(objAddr);
+
+				// Step 9: Retrieve the base memory object and its byte size
+				const auto baseObj = svfir->getBaseObject(objId);
+				u32_t objSize = baseObj->getByteSizeOfObj();
+
+				// Step 10: Calculate the access byte offset for this object and GEP
+				IntervalValue accessOffset = as.getByteOffset(gep);
+				auto upper = accessOffset.ub();
+				// Step 11: Check if the upper bound of accessOffset exceeds or equals the object size
+				if (upper.getIntNumeral() >= objSize) {
+					// Step 12: Report potential buffer overflow at this ICFG node
+					reportBufOverflow(gep->getICFGNode());
+				}
+			}
 		}
 	}
 }
@@ -187,63 +239,73 @@ void AbstractExecution::handleICFGCycle(const ICFGCycleWTO* cycle) {
 	// Get execution states from in edges
 	bool is_feasible =
 	    mergeStatesFromPredecessors(cycle->head()->getICFGNode(), preAbsTrace[cycle->head()->getICFGNode()]);
-	if (!is_feasible) {
+	if (!is_feasible)
 		return;
-	}
-	else {
-		AbstractState pre_as = preAbsTrace[cycle->head()->getICFGNode()];
-		// set -widen-delay
-		s32_t widen_delay = Options::WidenDelay();
-		bool increasing = true;
-		/// TODO: your code starts frok,kk;j.m here
 
-		const ICFGNode* head = cycle->head()->getICFGNode();
-		int i = 0;
+	/// TODO: your code starts here
 
-		while (true) {
-			AbstractState as_pre = preAbsTrace[head]; // Save current abstract state
+	const ICFGNode* l = cycle->head()->getICFGNode(); // ℓ := cycle.getHead().getICFGNode()
+	bool increasing = true;
+	int i = 0;
 
-			handleICFGNode(head); // Analyze the head node
+	std::cout << "[Cycle] Entering cycle at node " << l << std::endl;
+	while (true) {
+		AbstractState as_pre = getAbsStateFromTrace(l); // aspre := σℓ
+		std::cout << "[Cycle] Iteration " << i << ", pre-state for node " << l->getId() << ":\n";
+		// as_pre.printAbstractState();
 
-			AbstractState as_cur = preAbsTrace[head]; // Get updated abstract state
+		handleICFGNode(l); // handleICFGNode(ℓ)
 
-			if (i >= widen_delay) {
-				if (increasing) {
-					// Widening
-					AbstractState widened = as_pre.widening(as_cur);
-					preAbsTrace[head] = widened;
+		AbstractState as_cur = getAbsStateFromTrace(l);
+		; // ascur := σℓ
+		std::cout << "[Cycle] Iteration " << i << ", post-node state for node " << l->getId() << ":\n";
+		// as_cur.printAbstractState();
 
-					if (widened.equals(as_pre)) {
-						increasing = false;
-						continue;
-					}
-				}
-				else {
-					// Narrowing
-					AbstractState narrowed = as_pre.narrowing(as_cur);
-					preAbsTrace[head] = narrowed;
+		if (i >= Options::WidenDelay()) {
+			if (increasing) {
+				std::cout << "[Cycle] Widening at iteration " << i << std::endl;
+				AbstractState widened = as_pre.widening(as_cur); // σℓ := aspre ▽ ascur
+				std::cout << "[Cycle] Widen result for node " << l->getId() << ":\n";
+				// widened.printAbstractState();
+				preAbsTrace[l] = widened;
 
-					if (narrowed.equals(as_pre)) {
-						break;
-					}
+				if (widened.equals(as_pre)) { // σℓ ≡ aspre
+					increasing = false; // increasing := false
+					std::cout << "[Cycle] Widening stabilized; switching to narrowing" << std::endl;
+					continue; // restart loop with narrowing
 				}
 			}
+			else {
+				std::cout << "[Cycle] Narrowing at iteration " << i << std::endl;
+				AbstractState narrowed = as_pre.narrowing(as_cur); // σℓ := aspre ∆ ascur
+				std::cout << "[Cycle] Narrow result for node " << l->getId() << ":\n";
+				// narrowed.printAbstractState();
+				preAbsTrace[l] = narrowed;
 
-			++i;
+				if (narrowed.equals(as_pre)) { // σℓ ≡ aspre
+					std::cout << "[Cycle] Narrowing reached fixed point; exiting cycle" << std::endl;
+					break; // fixed-point reached
+				}
+			}
 		}
 
-		// After reaching fixed-point, analyze the rest of the components in the cycle
+		// Analyze remaining cycle components (WTO children)
 		for (const ICFGWTOComp* comp : cycle->getWTOComponents()) {
-			if (const auto subCycle = dyn_cast<ICFGCycleWTO>(comp)) {
-				handleICFGCycle(subCycle);
-			}
-			else if (const auto singleton = dyn_cast<ICFGSingletonWTO>(comp)) {
+			if (auto* singleton = dyn_cast<ICFGSingletonWTO>(comp)) {
+				std::cout << "[Cycle] Handling singleton node " << singleton->getICFGNode()->getId() << std::endl;
 				handleICFGNode(singleton->getICFGNode());
 			}
+			else if (auto* subCycle = dyn_cast<ICFGCycleWTO>(comp)) {
+				std::cout << "[Cycle] Recursing into sub-cycle at node " << subCycle->head()->getICFGNode()->getId()
+				          << std::endl;
+				handleICFGCycle(subCycle);
+			}
 		}
-
-		return;
+		++i;
 	}
+
+	// std::cout << "[Cycle] Exiting cycle at node " << l->getId() << std::endl;
+	return;
 }
 
 /// Abstract state updates on an AddrStmt
@@ -252,6 +314,7 @@ void AbstractExecution::updateStateOnAddr(const AddrStmt* addr) {
 	AbstractState& as = getAbsStateFromTrace(node);
 	as.initObjVar(SVFUtil::cast<ObjVar>(addr->getRHSVar()));
 	as[addr->getLHSVarID()] = as[addr->getRHSVarID()];
+	// as.printAbstractState();
 }
 
 /// Abstract state updates on an CmpStmt
@@ -407,7 +470,14 @@ void AbstractExecution::updateStateOnRet(const RetPE* retPE) {
 	AbstractState& as = getAbsStateFromTrace(node);
 	NodeID lhs = retPE->getLHSVarID();
 	NodeID rhs = retPE->getRHSVarID();
+
+	// std::cout << "\n[Return] Processing return at ICFGNode: " << node->getId() << "\n";
+	// std::cout << "[Return] LHS Var" << lhs << " ← RHS Var" << rhs << "\n";
+	// std::cout << "before return:";
+	// as.printAbstractState();
 	as[lhs] = as[rhs];
+	// std::cout << "after return:";
+	// as.printAbstractState();
 }
 
 /// Abstract state updates on an SelectStmt
@@ -427,18 +497,75 @@ void AbstractExecution::updateStateOnSelect(const SelectStmt* select) {
 	}
 }
 
-void AbstractExecution::updateStateOnExtCall(const SVF::CallICFGNode* extCallNode) {
+void AbstractExecution::updateStateOnExtCall(const CallICFGNode* extCallNode) {
 	std::string funcName = extCallNode->getCalledFunction()->getName();
-	// TODO: handle external calls
 
-	//  void mem_insert(void *buffer, const void *data, size_t data_size, size_t position);
 	if (funcName == "mem_insert") {
-		// check sizeof(buffer) > position + data_size
-		/// TODO: your code starts from here
+		AbstractState& as = getAbsStateFromTrace(extCallNode);
+
+		// Arguments: mem_insert(dst_buffer, offset, length)
+		NodeID bufferId = extCallNode->getArgument(0)->getId();
+		NodeID offsetId = extCallNode->getArgument(1)->getId();
+		NodeID lenId = extCallNode->getArgument(2)->getId();
+
+		const AbstractValue& bufferVal = as.loadValue(bufferId);
+		const AbstractValue& offsetVal = as.loadValue(offsetId);
+		const AbstractValue& lenVal = as.loadValue(lenId);
+
+		IntervalValue offsetIv = offsetVal.getInterval();
+		IntervalValue lenIv = lenVal.getInterval();
+
+		IntervalValue accessRange = offsetIv + lenIv;
+
+		for (u32_t addr : bufferVal.getAddrs()) { // Use getAddrs() from AddressValue
+			NodeID objID = as.getIDFromAddr(addr);
+			const BaseObjVar* baseObj = svfir->getBaseObject(objID); // Adjust method name if needed
+			u32_t objSize = baseObj->getByteSizeOfObj();
+
+			if (accessRange.ub().getIntNumeral() > objSize) {
+				reportBufOverflow(extCallNode);
+			}
+			else {
+				// Pass ValVar* or NodeID as per utils->handleMemcpy definition
+				utils->handleMemcpy(as,
+				                    extCallNode->getArgument(0), // dst buffer ValVar*
+				                    extCallNode->getArgument(1), // src offset ValVar*, may need src pointer instead
+				                    as[lenId].getInterval(), // data size ValVar*
+				                    offsetVal.getInterval().getIntNumeral()); // start position ValVar*
+			}
+		}
 	}
-	// void str_insert(void *buffer, const void *data, size_t position);
 	else if (funcName == "str_insert") {
-		// check sizeof(buffer) > position + strlen(data)
-		/// TODO: your code starts from here
+		AbstractState& as = getAbsStateFromTrace(extCallNode);
+
+		NodeID bufferID = extCallNode->getArgument(0)->getId();
+		NodeID strID = extCallNode->getArgument(1)->getId();
+		NodeID positionID = extCallNode->getArgument(2)->getId();
+
+		// Use utils helper to get string length (returns AbstractValue)
+		AbstractValue dataSizeVal = utils->getStrlen(as, extCallNode->getArgument(1));
+
+		AbstractValue bufferAddrs = as.loadValue(bufferID);
+		AbstractValue positionVal = as.loadValue(positionID);
+
+		IntervalValue offsetInt = positionVal.getInterval() + dataSizeVal.getInterval();
+
+		for (u32_t addr : bufferAddrs.getAddrs()) {
+			NodeID objId = as.getIDFromAddr(addr);
+			const BaseObjVar* baseObj = svfir->getBaseObject(objId);
+			u32_t objSize = baseObj->getByteSizeOfObj();
+
+			if (offsetInt.ub().getIntNumeral() > objSize) {
+				reportBufOverflow(extCallNode);
+			}
+			else {
+				utils->handleMemcpy(as,
+				                    extCallNode->getArgument(0), // dst buffer ValVar*
+				                    extCallNode->getArgument(1), // src string ValVar*
+				                    dataSizeVal.getInterval(), // length AbstractValue (from getStrlen)
+				                    positionVal.getInterval().getIntNumeral() // start position ValVar*
+				);
+			}
+		}
 	}
 }
