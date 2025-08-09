@@ -583,10 +583,10 @@ void AbstractExecution::analyse() {
  * @return True if the abstract state has changed, false if it has reached a fixpoint or is infeasible
  */
 bool AbstractExecution::handleICFGNode(const ICFGNode* node) {
-	std::cout << "[ICFG] Node " << node->getId() << " (" << node->getName() << "), has statements:\n";
-	for (const auto* stmt : node->getSVFStmts()) {
-		std::cout << "   - " << stmt->toString() << "\n";
-	}
+	// std::cout << "[ICFG] Node " << node->getId() << " (" << node->getName() << "), has statements:\n";
+	// for (const auto* stmt : node->getSVFStmts()) {
+	// 	std::cout << "   - " << stmt->toString() << "\n";
+	// }
 
 	AbstractState tmpEs;
 	bool is_feasible = mergeStatesFromPredecessors(node, tmpEs);
@@ -896,7 +896,7 @@ void AbstractExecution::handleStubFunctions(const SVF::CallICFGNode* callNode) {
 				}
 			}
 			if (overflow) {
-				std::cerr << "Your implementation successfully detected the buffer overflow\n";
+				std::cerr << "Your implementation successfully detected the buffer overflow of " << overflow << "\n";
 			}
 			else {
 				SVFUtil::errs() << "Your implementation failed to detect the buffer overflow!" << callNode->toString()

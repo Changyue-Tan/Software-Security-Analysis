@@ -142,7 +142,7 @@ void AbstractExecution::updateStateOnGep(const GepStmt* gep) {
 	IntervalValue index = as.getElementIndex(gep);
 	AddressValue gepAddrs = as.getGepObjAddrs(rhs, index);
 	as[lhs] = AbstractValue(gepAddrs);
-	std::cout << "[Gep] called\n";
+	// std::cout << "[Gep] called\n";
 }
 
 void AbstractExecution::updateStateOnPhi(const PhiStmt* phi) {
@@ -202,24 +202,62 @@ void AbstractExecution::bufOverflowDetection(const SVF::SVFStmt* stmt) {
 
 			/// TODO: your code starts from here
 
-			// Step 6: Iterate over all memory objects that 'rhs' points to
+			// --- Start TODO handling ---
+			// Compute the interval of the byte-offset for this GEP (relative to the base object).
+			IntervalValue accessOffset = as.getByteOffset(gep);
+			// If your analysis can compute size of the access (e.g., load/store size), use it.
+			// If not available, conservatively assume a 1-byte access.
+			u64_t accessSize = 1; // Conservatively assume 1-byte access since getAccessSize is unavailable
+
+			// Policy: when accessOffset is Top/unbounded we conservatively report a potential overflow.
+			const bool reportOnUnknownOffset = true;
+
+			// Iterate over all memory objects that 'rhs' may point to.
 			for (const auto& objAddr : as[rhs].getAddrs()) {
-				// Step 7-8: Get the internal SVF variable ID for this address
 				SVF::NodeID objId = as.getIDFromAddr(objAddr);
+				const auto baseObj = svfir->getBaseObject(objId); // use your project's API name
+				if (!baseObj)
+					continue; // defensive
 
-				// Step 9: Retrieve the base memory object and its byte size
-				const auto baseObj = svfir->getBaseObject(objId);
-				u32_t objSize = baseObj->getByteSizeOfObj();
+				u64_t objSize = baseObj->getByteSizeOfObj(); // assume returns u32/u64
 
-				// Step 10: Calculate the access byte offset for this object and GEP
-				IntervalValue accessOffset = as.getByteOffset(gep);
-				auto upper = accessOffset.ub();
-				// Step 11: Check if the upper bound of accessOffset exceeds or equals the object size
-				if (upper.getIntNumeral() >= objSize) {
-					// Step 12: Report potential buffer overflow at this ICFG node
+				// If accessOffset is bottom, skip (no reachable offset).
+				if (accessOffset.isBottom())
+					continue;
+
+				// If accessOffset is top / unbounded: handle according to policy.
+				if (accessOffset.isTop()) {
+					if (reportOnUnknownOffset) {
+						reportBufOverflow(gep->getICFGNode());
+					}
+					// either continue or break depending on semantics
+					continue;
+				}
+
+				// We have a (possibly) bounded interval. Check upper bound carefully.
+				// Make sure ub() is finite before calling getIntNumeral().
+				const auto ubVal = accessOffset.ub();
+				
+					if (reportOnUnknownOffset)
+						reportBufOverflow(gep->getICFGNode());
+					continue;
+				
+
+				// Convert to an unsigned 64-bit for safe compare.
+				// (Adapt this conversion if your IntervalValue uses APInt / BigInt.)
+				long long ubLL = ubVal.getIntNumeral(); // existing API in your codebase
+				if (ubLL < 0) {
+					// negative offset — depends on your model; treat as potential overflow
+					reportBufOverflow(gep->getICFGNode());
+					continue;
+				}
+				u64_t accessUpperByte = static_cast<u64_t>(ubLL) + (accessSize ? (accessSize - 1) : 0);
+				// If the highest byte accessed is >= objSize -> overflow
+				if (accessUpperByte >= objSize) {
 					reportBufOverflow(gep->getICFGNode());
 				}
 			}
+			// --- End TODO handling ---
 		}
 	}
 }
