@@ -217,14 +217,15 @@ void AbstractExecution::updateGepObjOffsetFromBase(AbstractState& as,
  * @return bool True if the state propagation is feasible and successful, false otherwise
  */
 bool AbstractExecution::mergeStatesFromPredecessors(const ICFGNode* block, AbstractState& as) {
-	//  std::cout << "\n[Merge] Merging states for block: " << block->getId() << " , with string: \n" << block->toString() << std::endl;
+	// std::cout << "\n[Merge] Merging states for block: " << block->getId() << " , with string: \n"
+	        //   << block->toString() << std::endl;
 
 	u32_t inEdgeNum = 0;
 	as = AbstractState();
 
 	for (auto& edge : block->getInEdges()) {
 		const ICFGNode* src = edge->getSrcNode();
-		//  std::cout << "[Merge] Checking incoming edge from node: " << src->getId() << std::endl;
+		// std::cout << "[Merge] Checking incoming edge from node: " << src->getId() << std::endl;
 
 		if (postAbsTrace.find(src) != postAbsTrace.end()) {
 			const IntraCFGEdge* intraCfgEdge = SVFUtil::dyn_cast<IntraCFGEdge>(edge);
@@ -232,17 +233,17 @@ bool AbstractExecution::mergeStatesFromPredecessors(const ICFGNode* block, Abstr
 			if (intraCfgEdge && intraCfgEdge->getCondition()) {
 				AbstractState tmpEs = postAbsTrace[src];
 				if (isBranchFeasible(intraCfgEdge, tmpEs)) {
-					//  std::cout << "[Merge] Feasible conditional edge. Merging state from node: " << src->getId()
+					// std::cout << "[Merge] Feasible conditional edge. Merging state from node: " << src->getId()
 					//           << std::endl;
 					as.joinWith(tmpEs);
 					inEdgeNum++;
 				}
 				else {
-					//  std::cout << "[Merge] Infeasible branch from node: " << src->getId() << std::endl;
+					// std::cout << "[Merge] Infeasible branch from node: " << src->getId() << std::endl;
 				}
 			}
 			else {
-				//  std::cout << "[Merge] Merging unconditional state from node: " << src->getId() << std::endl;
+				// std::cout << "[Merge] Merging unconditional state from node: " << src->getId() << std::endl;
 				as.joinWith(postAbsTrace[src]);
 				inEdgeNum++;
 			}
@@ -590,26 +591,35 @@ bool AbstractExecution::handleICFGNode(const ICFGNode* node) {
 
 	AbstractState tmpEs;
 	bool is_feasible = mergeStatesFromPredecessors(node, tmpEs);
+	// std::cout << "[Debug] mergeStatesFromPredecessors returned: " << (is_feasible ? "feasible" : "infeasible") << "\n";
 	if (!is_feasible) {
-		SVFUtil::errs() << "Infeasible for node " << node->getId() << "\n";
+		// SVFUtil::errs() << "[Warning] Infeasible for node " << node->getId() << "\n";
 		return false;
 	}
+	// std::cout << "[Debug] AbstractState after merge:\n" << tmpEs.toString() << "\n";
+
 	preAbsTrace[node] = tmpEs;
-	// Store the last abstract state, used to check if the abstract state has reached a fixpoint
 	AbstractState last_as = postAbsTrace[node];
 	postAbsTrace[node] = preAbsTrace[node];
+
 	for (const SVFStmt* stmt : node->getSVFStmts()) {
+		// std::cout << "[Debug] Updating state for statement: " << stmt->toString() << "\n";
 		updateAbsState(stmt);
 		bufOverflowDetection(stmt);
+		// std::cout << "[Debug] AbstractState after statement:\n" << postAbsTrace[node].toString() << "\n";
 	}
 
 	if (const CallICFGNode* callNode = SVFUtil::dyn_cast<CallICFGNode>(node)) {
+		// std::cout << "[Debug] Handling call site at node " << node->getId() << "\n";
 		handleCallSite(callNode);
+		// std::cout << "[Debug] Finished handling call site\n";
 	}
-	// If the abstract state is the same as the last abstract state, return false because we have reached fixpoint
+
 	if (postAbsTrace[node] == last_as) {
+		// std::cout << "[Info] Fixpoint reached at node " << node->getId() << ", no state change\n";
 		return false;
 	}
+	// std::cout << "[Info] Abstract state changed at node " << node->getId() << "\n";
 	return true;
 }
 /**
@@ -622,57 +632,57 @@ bool AbstractExecution::handleICFGNode(const ICFGNode* node) {
  */
 void AbstractExecution::updateAbsState(const SVFStmt* stmt) {
 	if (const AddrStmt* addr = SVFUtil::dyn_cast<AddrStmt>(stmt)) {
-		std::cout << "[Log] AddrStmt encountered.\n";
+		// std::cout << "[Log] AddrStmt encountered.\n";
 		updateStateOnAddr(addr);
 	}
 	else if (const BinaryOPStmt* binary = SVFUtil::dyn_cast<BinaryOPStmt>(stmt)) {
-		std::cout << "[Log] BinaryOPStmt encountered.\n";
+		// std::cout << "[Log] BinaryOPStmt encountered.\n";
 		updateStateOnBinary(binary);
 	}
 	else if (const CmpStmt* cmp = SVFUtil::dyn_cast<CmpStmt>(stmt)) {
-		std::cout << "[Log] CmpStmt encountered.\n";
+		// std::cout << "[Log] CmpStmt encountered.\n";
 		updateStateOnCmp(cmp);
 	}
 	else if (const LoadStmt* load = SVFUtil::dyn_cast<LoadStmt>(stmt)) {
-		std::cout << "[Log] LoadStmt encountered.\n";
+		// std::cout << "[Log] LoadStmt encountered.\n";
 		updateStateOnLoad(load);
 	}
 	else if (const StoreStmt* store = SVFUtil::dyn_cast<StoreStmt>(stmt)) {
-		std::cout << "[Log] StoreStmt encountered.\n";
+		// std::cout << "[Log] StoreStmt encountered.\n";
 		updateStateOnStore(store);
 	}
 	else if (const CopyStmt* copy = SVFUtil::dyn_cast<CopyStmt>(stmt)) {
-		std::cout << "[Log] CopyStmt encountered.\n";
+		// std::cout << "[Log] CopyStmt encountered.\n";
 		updateStateOnCopy(copy);
 	}
 	else if (const GepStmt* gep = SVFUtil::dyn_cast<GepStmt>(stmt)) {
-		std::cout << "[Log] GepStmt encountered.\n";
+		// std::cout << "[Log] GepStmt encountered.\n";
 		updateStateOnGep(gep);
 	}
 	else if (const PhiStmt* phi = SVFUtil::dyn_cast<PhiStmt>(stmt)) {
-		std::cout << "[Log] PhiStmt encountered.\n";
+		// std::cout << "[Log] PhiStmt encountered.\n";
 		updateStateOnPhi(phi);
 	}
 	else if (const CallPE* callPE = SVFUtil::dyn_cast<CallPE>(stmt)) {
-		std::cout << "[Log] CallPE encountered.\n";
+		// std::cout << "[Log] CallPE encountered.\n";
 		updateStateOnCall(callPE);
 	}
 	else if (const RetPE* retPE = SVFUtil::dyn_cast<RetPE>(stmt)) {
-		std::cout << "[Log] RetPE encountered.\n";
+		// std::cout << "[Log] RetPE encountered.\n";
 		updateStateOnRet(retPE);
 	}
 	else if (const SelectStmt* select = SVFUtil::dyn_cast<SelectStmt>(stmt)) {
-		std::cout << "[Log] SelectStmt encountered.\n";
+		// std::cout << "[Log] SelectStmt encountered.\n";
 		updateStateOnSelect(select);
 	}
 	else if (SVFUtil::isa<UnaryOPStmt>(stmt)) {
-		std::cout << "[Log] UnaryOPStmt encountered.\n";
+		// std::cout << "[Log] UnaryOPStmt encountered.\n";
 	}
 	else if (SVFUtil::isa<BranchStmt>(stmt)) {
-		std::cout << "[Log] BranchStmt encountered.\n";
+		// std::cout << "[Log] BranchStmt encountered.\n";
 	}
 	else {
-		std::cerr << "[Error] Unknown statement type encountered.\n";
+		// std::cerr << "[Error] Unknown statement type encountered.\n";
 		assert(false && "implement this part");
 	}
 }
@@ -687,11 +697,18 @@ void AbstractExecution::updateAbsState(const SVFStmt* stmt) {
 void AbstractExecution::handleCallSite(const CallICFGNode* callNode) {
 	// Get the callee function associated with the call site
 	const FunObjVar* callee = callNode->getCalledFunction();
+
+	// std::cerr << "[CallSite] visiting node " << callNode->getId() << " fun=" << callee->getName() << " in "
+	//           << callee->getName() << "\n";
+
 	std::string fun_name = callee->getName();
 	if (fun_name == "OVERFLOW" || fun_name == "svf_assert" || fun_name == "svf_assert_eq") {
+		// std::cerr << "[Stub] handling stub call node " << callNode->getId() << " fun=" << callee->getName() << "\n";
 		handleStubFunctions(callNode);
 	}
 	else if (fun_name == "nd" || fun_name == "rand") {
+		// std::cerr << "[ND/RAND] handling nd/rand call node " << callNode->getId() << " fun=" << callee->getName() << "\n";
+
 		NodeID lhsId = callNode->getRetICFGNode()->getActualRet()->getId();
 		postAbsTrace[callNode][lhsId] = AbstractValue(IntervalValue::top());
 	}
@@ -804,7 +821,17 @@ void AbstractExecution::handleFunction(const ICFGNode* funEntry) {
 		}
 		else {
 			if (!handleICFGNode(node)) {
-				SVFUtil::errs() << "Fixpoint reached or infeasible for node " << node->getId() << "\n";
+				// SVFUtil::errs() << "[Warning] Fixpoint reached or infeasible for node ID=" << node->getId();
+
+				// 如果能获取函数名，打印函数名
+				if (const FunObjVar* fun = node->getFun()) {
+					// SVFUtil::errs() << " fun=" << fun->getName();
+				}
+
+				AbstractState& as = getAbsStateFromTrace(node);
+				// SVFUtil::errs() << "[Debug] Abstract state at node " << node->getId() << "\n";
+				// as.printAbstractState();
+
 				continue;
 			}
 			std::vector<const ICFGNode*> nextNodes = getNextNodes(node);
@@ -836,21 +863,21 @@ void AbstractExecution::handleStubFunctions(const SVF::CallICFGNode* callNode) {
 
 		// Check if the interval for the argument is infinite
 		if (as[arg0].getInterval().is_infinite()) {
-			SVFUtil::errs() << "svf_assert Fail. " << callNode->toString() << "\n";
+			// SVFUtil::errs() << "svf_assert Fail. " << callNode->toString() << "\n";
 			assert(false);
 		}
 		else {
 			if (as[arg0].getInterval().equals(IntervalValue(1, 1))) {
 				std::stringstream ss;
-				ss << "The assertion (" << callNode->toString() << ")"
-				   << " is successfully verified!!\n";
-				SVFUtil::outs() << ss.str() << std::endl;
+				// ss << "The assertion (" << callNode->toString() << ")"
+				//    << " is successfully verified!!\n";
+				// SVFUtil::outs() << ss.str() << std::endl;
 			}
 			else {
 				std::stringstream ss;
-				ss << "The assertion (" << callNode->toString() << ")"
-				   << " is unsatisfiable!!\n";
-				SVFUtil::outs() << ss.str() << std::endl;
+				// ss << "The assertion (" << callNode->toString() << ")"
+				//    << " is unsatisfiable!!\n";
+				// SVFUtil::outs() << ss.str() << std::endl;
 				assert(false);
 			}
 		}

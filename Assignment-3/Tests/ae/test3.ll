@@ -4,9 +4,12 @@ target datalayout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16
 target triple = "x86_64-unknown-linux-gnu"
 
 ; Function Attrs: noinline nounwind optnone uwtable
-define dso_local i32 @nd() #0 {
+define dso_local i32 @rand(i32 noundef %a) #0 {
 entry:
-  ret i32 1
+  %a.addr = alloca i32, align 4
+  store i32 %a, ptr %a.addr, align 4
+  %0 = load i32, ptr %a.addr, align 4
+  ret i32 %0
 }
 
 ; Function Attrs: noinline nounwind optnone uwtable
@@ -14,58 +17,27 @@ define dso_local i32 @main() #0 {
 entry:
   %retval = alloca i32, align 4
   %x = alloca i32, align 4
-  %y = alloca i32, align 4
   store i32 0, ptr %retval, align 4
-  store i32 1, ptr %x, align 4
-  store i32 0, ptr %y, align 4
-  %call = call i32 @nd()
-  switch i32 %call, label %sw.default [
-    i32 0, label %sw.bb
-    i32 1, label %sw.bb1
-    i32 2, label %sw.bb3
-  ]
-
-sw.bb:                                            ; preds = %entry
+  %call = call i32 @rand(i32 noundef 1)
+  store i32 %call, ptr %x, align 4
   %0 = load i32, ptr %x, align 4
-  %add = add nsw i32 %0, 1
-  store i32 %add, ptr %x, align 4
-  br label %sw.epilog
+  %cmp = icmp sgt i32 %0, 1
+  br i1 %cmp, label %if.then, label %if.else
 
-sw.bb1:                                           ; preds = %entry
-  %1 = load i32, ptr %y, align 4
-  %2 = load i32, ptr %x, align 4
-  %add2 = add nsw i32 %2, %1
-  store i32 %add2, ptr %x, align 4
-  br label %sw.epilog
+if.then:                                          ; preds = %entry
+  store i32 1, ptr %retval, align 4
+  br label %return
 
-sw.bb3:                                           ; preds = %entry
-  %3 = load i32, ptr %y, align 4
-  %4 = load i32, ptr %x, align 4
-  %sub = sub nsw i32 %4, %3
-  store i32 %sub, ptr %x, align 4
-  br label %sw.epilog
+if.else:                                          ; preds = %entry
+  store i32 0, ptr %retval, align 4
+  br label %return
 
-sw.default:                                       ; preds = %entry
-  %5 = load i32, ptr %x, align 4
-  %inc = add nsw i32 %5, 1
-  store i32 %inc, ptr %x, align 4
-  %6 = load i32, ptr %y, align 4
-  %inc4 = add nsw i32 %6, 1
-  store i32 %inc4, ptr %y, align 4
-  br label %sw.epilog
-
-sw.epilog:                                        ; preds = %sw.default, %sw.bb3, %sw.bb1, %sw.bb
-  %7 = load i32, ptr %x, align 4
-  %8 = load i32, ptr %y, align 4
-  %cmp = icmp sge i32 %7, %8
-  call void @svf_assert(i1 noundef zeroext %cmp)
-  ret i32 0
+return:                                           ; preds = %if.else, %if.then
+  %1 = load i32, ptr %retval, align 4
+  ret i32 %1
 }
 
-declare void @svf_assert(i1 noundef zeroext) #1
-
 attributes #0 = { noinline nounwind optnone uwtable "frame-pointer"="all" "min-legal-vector-width"="0" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "target-cpu"="x86-64" "target-features"="+cx8,+fxsr,+mmx,+sse,+sse2,+x87" "tune-cpu"="generic" }
-attributes #1 = { "frame-pointer"="all" "no-trapping-math"="true" "stack-protector-buffer-size"="8" "target-cpu"="x86-64" "target-features"="+cx8,+fxsr,+mmx,+sse,+sse2,+x87" "tune-cpu"="generic" }
 
 !llvm.module.flags = !{!0, !1, !2, !3, !4}
 !llvm.ident = !{!5}

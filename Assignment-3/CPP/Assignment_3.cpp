@@ -188,10 +188,13 @@ void AbstractExecution::updateStateOnPhi(const PhiStmt* phi) {
 }
 
 /// TODO: handle GepStmt `lhs = rhs + off` and detect buffer overflow
-// Step 1: For each `obj \in pts(rhs)`, get the size of allocated baseobj (entire mem object) via `obj_size =
-// svfir->getBaseObj(objId)->getByteSizeOfObj();` There is a buffer overflow if `accessOffset.ub() >= obj_size`, where
-// accessOffset is obtained via `getAccessOffset` Step 2: invoke `reportBufOverflow` with the current ICFGNode if an
-// overflow is detected
+// Step 1:
+//			For each `obj \in pts(rhs)`, get the size of allocated baseobj (entire mem object) via
+// 			`obj_size = svfir->getBaseObj(objId)->getByteSizeOfObj();`
+// 			There is a buffer overflow if `accessOffset.ub() >= obj_size`,
+// 			where accessOffset is obtained via `getAccessOffset`
+// Step 2:
+//			invoke `reportBufOverflow` with the current ICFGNode if an overflow is detected
 void AbstractExecution::bufOverflowDetection(const SVF::SVFStmt* stmt) {
 	if (!SVFUtil::isa<CallICFGNode>(stmt->getICFGNode())) {
 		if (const GepStmt* gep = SVFUtil::dyn_cast<GepStmt>(stmt)) {
@@ -202,62 +205,50 @@ void AbstractExecution::bufOverflowDetection(const SVF::SVFStmt* stmt) {
 
 			/// TODO: your code starts from here
 
-			// --- Start TODO handling ---
-			// Compute the interval of the byte-offset for this GEP (relative to the base object).
 			IntervalValue accessOffset = as.getByteOffset(gep);
-			// If your analysis can compute size of the access (e.g., load/store size), use it.
-			// If not available, conservatively assume a 1-byte access.
-			u64_t accessSize = 1; // Conservatively assume 1-byte access since getAccessSize is unavailable
+			u64_t accessSize = 1; // conservative assumption
+			bool reportOnUnknownOffset = true;
 
-			// Policy: when accessOffset is Top/unbounded we conservatively report a potential overflow.
-			const bool reportOnUnknownOffset = true;
-
-			// Iterate over all memory objects that 'rhs' may point to.
 			for (const auto& objAddr : as[rhs].getAddrs()) {
-				SVF::NodeID objId = as.getIDFromAddr(objAddr);
-				const auto baseObj = svfir->getBaseObject(objId); // use your project's API name
+				NodeID objId = as.getIDFromAddr(objAddr);
+				auto* baseObj = svfir->getBaseObject(objId); // correct API in SVF
 				if (!baseObj)
-					continue; // defensive
-
-				u64_t objSize = baseObj->getByteSizeOfObj(); // assume returns u32/u64
-
-				// If accessOffset is bottom, skip (no reachable offset).
-				if (accessOffset.isBottom())
 					continue;
 
-				// If accessOffset is top / unbounded: handle according to policy.
+				u64_t objSize = baseObj->getByteSizeOfObj();
+
+				if (accessOffset.isBottom()) {
+					// no reachable offset
+					continue;
+				}
+
 				if (accessOffset.isTop()) {
 					if (reportOnUnknownOffset) {
 						reportBufOverflow(gep->getICFGNode());
 					}
-					// either continue or break depending on semantics
 					continue;
 				}
 
-				// We have a (possibly) bounded interval. Check upper bound carefully.
-				// Make sure ub() is finite before calling getIntNumeral().
-				const auto ubVal = accessOffset.ub();
-				
-					if (reportOnUnknownOffset)
+				auto ubVal = accessOffset.ub();
+				if (ubVal.is_plus_infinity()) {
+					if (reportOnUnknownOffset) {
 						reportBufOverflow(gep->getICFGNode());
+					}
 					continue;
-				
+				}
 
-				// Convert to an unsigned 64-bit for safe compare.
-				// (Adapt this conversion if your IntervalValue uses APInt / BigInt.)
-				long long ubLL = ubVal.getIntNumeral(); // existing API in your codebase
+				long long ubLL = ubVal.getIntNumeral();
 				if (ubLL < 0) {
-					// negative offset — depends on your model; treat as potential overflow
+					// negative offset → potential underflow
 					reportBufOverflow(gep->getICFGNode());
 					continue;
 				}
-				u64_t accessUpperByte = static_cast<u64_t>(ubLL) + (accessSize ? (accessSize - 1) : 0);
-				// If the highest byte accessed is >= objSize -> overflow
+
+				u64_t accessUpperByte = static_cast<u64_t>(ubLL) + (accessSize - 1);
 				if (accessUpperByte >= objSize) {
 					reportBufOverflow(gep->getICFGNode());
 				}
 			}
-			// --- End TODO handling ---
 		}
 	}
 }
@@ -282,67 +273,51 @@ void AbstractExecution::handleICFGCycle(const ICFGCycleWTO* cycle) {
 
 	/// TODO: your code starts here
 
-	const ICFGNode* l = cycle->head()->getICFGNode(); // ℓ := cycle.getHead().getICFGNode()
+	const ICFGNode* l = cycle->head()->getICFGNode();
 	bool increasing = true;
 	int i = 0;
 
-	std::cout << "[Cycle] Entering cycle at node " << l << std::endl;
 	while (true) {
-		AbstractState as_pre = getAbsStateFromTrace(l); // aspre := σℓ
-		std::cout << "[Cycle] Iteration " << i << ", pre-state for node " << l->getId() << ":\n";
-		// as_pre.printAbstractState();
+		AbstractState as_pre = getAbsStateFromTrace(l);
 
-		handleICFGNode(l); // handleICFGNode(ℓ)
+		handleICFGNode(l);
 
 		AbstractState as_cur = getAbsStateFromTrace(l);
-		; // ascur := σℓ
-		std::cout << "[Cycle] Iteration " << i << ", post-node state for node " << l->getId() << ":\n";
-		// as_cur.printAbstractState();
 
 		if (i >= Options::WidenDelay()) {
 			if (increasing) {
-				std::cout << "[Cycle] Widening at iteration " << i << std::endl;
-				AbstractState widened = as_pre.widening(as_cur); // σℓ := aspre ▽ ascur
-				std::cout << "[Cycle] Widen result for node " << l->getId() << ":\n";
-				// widened.printAbstractState();
+				// widening: sigma_l := as_pre ▽ as_cur
+				AbstractState widened = as_pre.widening(as_cur);
 				preAbsTrace[l] = widened;
 
-				if (widened.equals(as_pre)) { // σℓ ≡ aspre
-					increasing = false; // increasing := false
-					std::cout << "[Cycle] Widening stabilized; switching to narrowing" << std::endl;
-					continue; // restart loop with narrowing
+				if (widened.equals(as_pre)) {
+					increasing = false;
+					continue;
 				}
 			}
 			else {
-				std::cout << "[Cycle] Narrowing at iteration " << i << std::endl;
-				AbstractState narrowed = as_pre.narrowing(as_cur); // σℓ := aspre ∆ ascur
-				std::cout << "[Cycle] Narrow result for node " << l->getId() << ":\n";
-				// narrowed.printAbstractState();
+				AbstractState narrowed = as_pre.narrowing(as_cur);
 				preAbsTrace[l] = narrowed;
 
-				if (narrowed.equals(as_pre)) { // σℓ ≡ aspre
-					std::cout << "[Cycle] Narrowing reached fixed point; exiting cycle" << std::endl;
-					break; // fixed-point reached
+				if (narrowed.equals(as_pre)) {
+					break;
 				}
 			}
 		}
 
-		// Analyze remaining cycle components (WTO children)
+		// analyze remaining WTO components after fixed points
 		for (const ICFGWTOComp* comp : cycle->getWTOComponents()) {
 			if (auto* singleton = dyn_cast<ICFGSingletonWTO>(comp)) {
-				std::cout << "[Cycle] Handling singleton node " << singleton->getICFGNode()->getId() << std::endl;
 				handleICFGNode(singleton->getICFGNode());
 			}
 			else if (auto* subCycle = dyn_cast<ICFGCycleWTO>(comp)) {
-				std::cout << "[Cycle] Recursing into sub-cycle at node " << subCycle->head()->getICFGNode()->getId()
-				          << std::endl;
 				handleICFGCycle(subCycle);
 			}
 		}
-		++i;
+
+		i++;
 	}
 
-	// std::cout << "[Cycle] Exiting cycle at node " << l->getId() << std::endl;
 	return;
 }
 
@@ -537,72 +512,125 @@ void AbstractExecution::updateStateOnSelect(const SelectStmt* select) {
 
 void AbstractExecution::updateStateOnExtCall(const CallICFGNode* extCallNode) {
 	std::string funcName = extCallNode->getCalledFunction()->getName();
+	AbstractState& as = getAbsStateFromTrace(extCallNode);
+
+	// as.printAbstractState();
+
+	// std::cerr << "[Info] updateStateOnExtCall called for function: " << funcName << "\n";
 
 	if (funcName == "mem_insert") {
-		AbstractState& as = getAbsStateFromTrace(extCallNode);
-
-		// Arguments: mem_insert(dst_buffer, offset, length)
 		NodeID bufferId = extCallNode->getArgument(0)->getId();
-		NodeID offsetId = extCallNode->getArgument(1)->getId();
-		NodeID lenId = extCallNode->getArgument(2)->getId();
+		NodeID dataId = extCallNode->getArgument(1)->getId();
+		NodeID dataSizeId = extCallNode->getArgument(2)->getId();
+		NodeID positionId = extCallNode->getArgument(3)->getId();
 
-		const AbstractValue& bufferVal = as.loadValue(bufferId);
-		const AbstractValue& offsetVal = as.loadValue(offsetId);
-		const AbstractValue& lenVal = as.loadValue(lenId);
+		// std::cerr << "[Debug] mem_insert args NodeIDs: buffer=" << bufferId << ", data=" << dataId
+		//           << ", dataSize=" << dataSizeId << ", position=" << positionId << "\n";
 
-		IntervalValue offsetIv = offsetVal.getInterval();
-		IntervalValue lenIv = lenVal.getInterval();
+		// get buffer address set
+		const AbstractValue& bufferAddrs = as[bufferId];
+		// get data size value
+		const AbstractValue& dataSizeVal = as[dataSizeId];
+		const AbstractValue& positionVal = as[positionId];
 
-		IntervalValue accessRange = offsetIv + lenIv;
+		// std::cerr << "[Debug] bufferAddrs: " << bufferAddrs.toString() << "\n";
+		// std::cerr << "[Debug] dataSizeVal: " << dataSizeVal.toString() << "\n";
+		// std::cerr << "[Debug] positionVal: " << positionVal.toString() << "\n";
 
-		for (u32_t addr : bufferVal.getAddrs()) { // Use getAddrs() from AddressValue
+		IntervalValue offsetIv = positionVal.getInterval();
+		IntervalValue sizeIv = dataSizeVal.getInterval();
+
+		// if (offsetIv.isBottom()) {
+		// 	std::cerr << "[Error] position interval is bottom (invalid)!\n";
+		// }
+		// if (sizeIv.isBottom()) {
+		// 	std::cerr << "[Error] dataSize interval is bottom (invalid)!\n";
+		// }
+
+		IntervalValue accessOffset = offsetIv + sizeIv;
+
+		// if (accessOffset.isBottom()) {
+		// 	std::cerr << "[Error] accessOffset interval is bottom after addition!\n";
+		// }
+		// else {
+		// 	std::cerr << "[Debug] accessOffset interval after addition: " << accessOffset.toString() << "\n";
+		// }
+
+		for (u32_t addr : bufferAddrs.getAddrs()) {
 			NodeID objID = as.getIDFromAddr(addr);
-			const BaseObjVar* baseObj = svfir->getBaseObject(objID); // Adjust method name if needed
+			const BaseObjVar* baseObj = svfir->getBaseObject(objID);
 			u32_t objSize = baseObj->getByteSizeOfObj();
 
-			if (accessRange.ub().getIntNumeral() > objSize) {
+			// std::cerr << "[Trace] Checking object ID=" << objID << " size=" << objSize << " bytes\n";
+
+			if (!accessOffset.isBottom() && accessOffset.ub().getIntNumeral() >= objSize) {
+				// std::cerr << "[Alert] Buffer overflow detected!\n";
 				reportBufOverflow(extCallNode);
 			}
 			else {
-				// Pass ValVar* or NodeID as per utils->handleMemcpy definition
 				utils->handleMemcpy(as,
-				                    extCallNode->getArgument(0), // dst buffer ValVar*
-				                    extCallNode->getArgument(1), // src offset ValVar*, may need src pointer instead
-				                    as[lenId].getInterval(), // data size ValVar*
-				                    offsetVal.getInterval().getIntNumeral()); // start position ValVar*
+				                    extCallNode->getArgument(0), // dst buffer
+				                    extCallNode->getArgument(1), // src data
+				                    sizeIv,
+				                    offsetIv.ub().getIntNumeral());
 			}
 		}
 	}
 	else if (funcName == "str_insert") {
-		AbstractState& as = getAbsStateFromTrace(extCallNode);
+		NodeID bufferId = extCallNode->getArgument(0)->getId();
+		NodeID strArgId = extCallNode->getArgument(1)->getId();
+		NodeID positionId = extCallNode->getArgument(2)->getId();
 
-		NodeID bufferID = extCallNode->getArgument(0)->getId();
-		NodeID strID = extCallNode->getArgument(1)->getId();
-		NodeID positionID = extCallNode->getArgument(2)->getId();
+		// std::cerr << "[Debug] str_insert args NodeIDs: buffer=" << bufferId << ", str=" << strArgId
+		//           << ", position=" << positionId << "\n";
 
-		// Use utils helper to get string length (returns AbstractValue)
+		const AbstractValue& bufferAddrs = as[bufferId];
+		// std::cerr << "[Debug] bufferAddrs: " << bufferAddrs.toString() << "\n";
+
+		const AbstractValue& positionVal = as[positionId];
 		AbstractValue dataSizeVal = utils->getStrlen(as, extCallNode->getArgument(1));
 
-		AbstractValue bufferAddrs = as.loadValue(bufferID);
-		AbstractValue positionVal = as.loadValue(positionID);
+		// std::cerr << "[Debug] positionVal: " << positionVal.toString() << "\n";
+		// std::cerr << "[Debug] dataSizeVal (strlen): " << dataSizeVal.toString() << "\n";
 
-		IntervalValue offsetInt = positionVal.getInterval() + dataSizeVal.getInterval();
+		IntervalValue posIv = positionVal.getInterval();
+		IntervalValue sizeIv = dataSizeVal.getInterval();
+		IntervalValue accessOffset = posIv + sizeIv;
+
+		if (posIv.isBottom()) {
+			// std::cerr << "[Error] position interval is bottom (invalid)!\n";
+			return;
+		}
+		if (sizeIv.isBottom()) {
+			// std::cerr << "[Error] dataSize interval is bottom (invalid)!\n";
+			return;
+		}
+		if (accessOffset.isBottom()) {
+			// std::cerr << "[Error] accessOffset interval is bottom after addition!\n";
+			return;
+		}
+
+		// std::cerr << "[Debug] accessOffset interval: " << accessOffset.toString() << "\n";
 
 		for (u32_t addr : bufferAddrs.getAddrs()) {
-			NodeID objId = as.getIDFromAddr(addr);
-			const BaseObjVar* baseObj = svfir->getBaseObject(objId);
+			NodeID objID = as.getIDFromAddr(addr);
+			const BaseObjVar* baseObj = svfir->getBaseObject(objID);
 			u32_t objSize = baseObj->getByteSizeOfObj();
 
-			if (offsetInt.ub().getIntNumeral() > objSize) {
+			// std::cerr << "[Trace] Checking buffer object ID: " << objID << " with size: " << objSize << "\n";
+
+			if (accessOffset.ub().getIntNumeral() >= objSize) {
+				// std::cerr << "[Warning] Buffer overflow detected! accessOffset.ub = "
+				//           << accessOffset.ub().getIntNumeral() << " >= objSize = " << objSize << "\n";
 				reportBufOverflow(extCallNode);
 			}
 			else {
+				// std::cerr << "[Info] No overflow. Proceeding with handleMemcpy.\n";
 				utils->handleMemcpy(as,
-				                    extCallNode->getArgument(0), // dst buffer ValVar*
-				                    extCallNode->getArgument(1), // src string ValVar*
-				                    dataSizeVal.getInterval(), // length AbstractValue (from getStrlen)
-				                    positionVal.getInterval().getIntNumeral() // start position ValVar*
-				);
+				                    extCallNode->getArgument(0), // dst buffer
+				                    extCallNode->getArgument(1), // src string
+				                    sizeIv,
+				                    posIv.ub().getIntNumeral());
 			}
 		}
 	}
